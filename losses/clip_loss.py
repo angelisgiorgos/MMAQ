@@ -4,7 +4,6 @@ import torch
 from torch import nn
 import torch.nn.functional as F
 
-LARGE_NUM = 1e9
 
 class CLIPLoss(torch.nn.Module):
     """

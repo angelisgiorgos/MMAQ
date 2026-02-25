@@ -1,18 +1,13 @@
-import torch
 import os
 import numpy as np
-import random
+from PIL import Image
 from torch.utils.data import Dataset
 import rasterio as rio
-import torchvision.transforms as T
-from .transforms import ChangeBandOrder
-from lightly.transforms.utils import IMAGENET_NORMALIZE
-from rasterio.plot import reshape_as_image
-from PIL import Image
+from utils.data_utils import normalize_to_uint8
 
 
 class PlantDataset(Dataset):
-    def __init__(self, args, channels, size=None, data_path = None, mode='training/120x120/', reg_data=None, mult=1,
+    def __init__(self, args, channels, size=None, data_path = "", mode='training/120x120/', reg_data=None, mult=1,
                  transform=None):
         super().__init__()
 
@@ -36,7 +31,6 @@ class PlantDataset(Dataset):
         self.read_imaages(fuel_type_dict)
 
         self.channels = channels
-        
 
 
     def read_imaages(self, fuel_type_dict):
@@ -57,7 +51,7 @@ class PlantDataset(Dataset):
                     continue
 
                 if 'positive' in root :
-                    if len(self.reg_data[self.reg_data['filename'] == filename]) != 0 and sum(self.reg_data[self.reg_data['filename'] == filename]['gen_output'].isna()) == 0:
+                    if self.reg_data is not None and len(self.reg_data[self.reg_data['filename'] == filename]) != 0 and sum(self.reg_data[self.reg_data['filename'] == filename]['gen_output'].isna()) == 0:
                         self.positive_indices.append(idx)
                         self.imgfiles.append(os.path.join(root, filename))
                         self.fossil_type.append(fuel_type_dict[self.reg_data[self.reg_data['filename'] == filename]['fuel_type'].unique()[0]])
@@ -71,7 +65,7 @@ class PlantDataset(Dataset):
                     if idx >= len(self.positive_indices) * 2:
                         break
                     if 'negative' in root:
-                        if len(self.reg_data[self.reg_data['filename'] == filename]) != 0 and sum(self.reg_data[self.reg_data['filename'] == filename]['gen_output'].isna()) == 0:
+                        if self.reg_data is not None and len(self.reg_data[self.reg_data['filename'] == filename]) != 0 and sum(self.reg_data[self.reg_data['filename'] == filename]['gen_output'].isna()) == 0:
                             self.negative_indices.append(idx)
                             self.imgfiles.append(os.path.join(root, filename))
                             self.fossil_type.append(fuel_type_dict[self.reg_data[self.reg_data['filename'] == filename]['fuel_type'].unique()[0]])
@@ -92,30 +86,6 @@ class PlantDataset(Dataset):
     def __len__(self):
         """Returns length of data set."""
         return len(self.imgfiles)
-
-
-    def _normalize_for_display(self, band_data):
-        band_data = reshape_as_image(np.array(band_data))
-        lower_perc = np.percentile(band_data, 2, axis=(0,1))
-        upper_perc = np.percentile(band_data, 98, axis=(0,1))
-        return (band_data - lower_perc) / (upper_perc - lower_perc)
-
-    
-    def normalize_to_uint8(self, data, min_percentile=2, max_percentile=98):
-        # Calculate the clipping range using percentiles
-        min_val = np.percentile(data, min_percentile)
-        max_val = np.percentile(data, max_percentile)
-        
-        # Clip the data to the specified range
-        clipped_data = np.clip(data, min_val, max_val)
-        
-        # Normalize the data to 0-1
-        normalized_data = (clipped_data - min_val) / (max_val - min_val)
-        
-        # Scale the data to 0-255
-        uint8_data = (normalized_data * 255).astype(np.uint8)
-        
-        return uint8_data
 
     
     def __getitem__(self, idx):
@@ -158,7 +128,7 @@ class PlantDataset(Dataset):
             # apply transformations
             if self.transform:
                 img = sample["img"].transpose(1, 2, 0)
-                img = self.normalize_to_uint8(img)
+                img = normalize_to_uint8(img)
                 
                 
                 img = Image.fromarray(img).resize((256, 256))
@@ -168,178 +138,3 @@ class PlantDataset(Dataset):
                 sample = self.transform(sample)
         return sample
 
-
-
-
-class ToTensor(object):
-    """Convert ndarrays in sample to Tensors."""
-    def __call__(self, sample):
-        """
-        :param sample: sample to be converted to Tensor
-        :return: converted Tensor sample
-        """
-
-        out = {'idx': sample['idx'],
-               'labels': torch.tensor(sample['labels']),
-               'img': torch.from_numpy(sample['img'].copy()).float(),
-               'imgfile': sample['imgfile']}
-
-        return out
-
-
-class Randomize(object):
-    """Randomize image orientation including rotations by integer multiples of
-       90 deg, (horizontal) mirroring, and (vertical) flipping."""
-
-    def __call__(self, sample):
-        """
-        :param sample: sample to be randomized
-        :return: randomized sample
-        """
-        imgdata = sample['img']
-
-        # mirror horizontally
-        func = Mirror()
-        imgdata = func(imgdata)
-        # flip vertically
-        func = Flip()
-        imgdata = func(imgdata)
-        # rotate by [0,1,2,3]*90 deg
-        func = Rotate()
-        imgdata = func(imgdata)
-
-        return {'idx': sample['idx'],
-                'img': imgdata.copy(),
-                'labels': sample['labels'],
-                'imgfile': sample['imgfile']}
-
-
-class Resize(object):
-    def __init__(self, size):
-        self.size = size
-
-    def __call__(self, sample):
-        img = sample.get("img").clone()
-
-
-        resized_img = T.functional.resize(img, size=(self.size, self.size),
-                                          interpolation=T.InterpolationMode.BICUBIC)
-
-        out = {}
-        for k, v in sample.items():
-            if k == "img":
-                out[k] = resized_img.float()
-            else:
-                out[k] = v
-        return out
-
-
-class Normalize(object):
-    """Normalize pixel values to zero mean and range [-1, +1] measured in
-    standard deviations."""
-    def __init__(self, channels):
-        self.channels_means = np.array(
-            [960.97437, 1110.9012, 1250.0942, 1259.5178, 1500.98,
-             1989.6344, 2155.846, 2251.6265, 2272.9438, 2442.6206,
-             1914.3, 1512.0585])
-        self.channels_stds = np.array(
-            [1302.0157, 1418.4988, 1381.5366, 1406.7112, 1387.4155, 1438.8479,
-             1497.8815, 1604.1998, 1516.532, 1827.3025, 1303.83, 1189.9052])
-
-        self.channel_means = self.channels_means[channels]
-        self.channel_stds = self.channels_stds[channels]
-
-
-    def __call__(self, sample):
-        """
-        :param sample: sample to be normalized
-        :return: normalized sample
-        """
-        sample['img'] = (sample['img'] - self.channel_means.reshape(
-            sample['img'].shape[0], 1, 1)) / self.channel_stds.reshape(
-            sample['img'].shape[0], 1, 1)
-        return sample
-
-
-class Mirror(object):
-    """Mirror image."""
-    def __init__(self, p=0.5, always_apply=False):
-        self.p = p
-        self.always_apply = always_apply
-
-    def __call__(self, imgdata):
-        if self.always_apply:
-            self.p = 0
-        if self.p < random.random():
-            imgdata = np.flip(imgdata, 2)
-        return imgdata
-
-
-class Flip(object):
-    """Flip image."""
-    def __init__(self, p=0.5, always_apply=False):
-        self.p = p
-        self.always_apply = always_apply
-
-    def __call__(self, imgdata):
-        if self.always_apply:
-            self.p = 0
-        if self.p < random.random():
-            imgdata = np.flip(imgdata, 1)
-        return imgdata
-
-
-class Rotate(object):
-    """Rotate image."""
-    def __init__(self, p=0.5, always_apply=False):
-        self.p = p
-        self.always_apply = always_apply
-
-    def __call__(self, imgdata):
-        if self.always_apply:
-            self.p = 0
-        if self.p < random.random():
-            rot = np.random.randint(0, 4)
-            imgdata = np.rot90(imgdata, rot, axes=(1, 2))
-        return imgdata
-
-
-
-def create_dataset(args, data_path, mode, reg_data, mult, apply_transforms=True, train=False, size=120, new_imgsize=120,
-                   channels=[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]):
-    """Create a dataset; uses same input parameters as PowerPlantDataset.
-    :param apply_transforms: if `True`, apply available transformations
-    :return: data set"""
-    if apply_transforms:
-        if train:
-            if args.datatype == "rgb_unimodal":
-                data_transforms = T.Compose([
-                T.Resize(224),
-                T.RandomHorizontalFlip(),
-                T.ToTensor(),
-                T.Normalize(mean=IMAGENET_NORMALIZE["mean"], std=IMAGENET_NORMALIZE["std"]),
-                ])
-            else:
-                data_transforms = T.Compose([
-                    ChangeBandOrder(),
-                    Normalize(np.array(channels)),
-                    Randomize(),
-                    ToTensor(),
-                    Resize(new_imgsize)])
-                
-        else:
-            if args.datatype == "rgb_unimodal":
-                data_transforms = T.Compose([
-                    T.Resize(224),
-                    T.ToTensor(),
-                    T.Normalize(mean=IMAGENET_NORMALIZE["mean"], std=IMAGENET_NORMALIZE["std"])])
-            else:
-                data_transforms = T.Compose([
-                    ChangeBandOrder(),
-                    Normalize(np.array(channels)),
-                    ToTensor(),
-                    Resize(new_imgsize)])
-
-    data = PlantDataset(args, channels=channels, size=size, data_path = data_path, mode=mode, reg_data=reg_data, mult=mult,
-                            transform=data_transforms)
-    return data

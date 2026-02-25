@@ -1,7 +1,5 @@
 import os
 from typing import Tuple, Union
-import cv2
-
 os.environ["OMP_NUM_THREADS"] = "6"  # export OMP_NUM_THREADS=4
 os.environ["OPENBLAS_NUM_THREADS"] = "6"  # export OPENBLAS_NUM_THREADS=4
 os.environ["MKL_NUM_THREADS"] = "6"  # export MKL_NUM_THREADS=6
@@ -928,11 +926,20 @@ class UpScaleTransform(object):
             else:
                 out[k] = v
         return out
-            
 
 
-    
+class SwapNoiseCorrupter(object):
+    """Apply swap noise on the input data.
 
+    Each data point has specified chance be replaced by a random value from the same column.
+    """
 
+    def __init__(self, probas):
+        super().__init__()
+        self.probas = torch.from_numpy(np.array(probas))
 
-
+    def forward(self, x):
+        should_swap = torch.bernoulli(self.probas.to(x.device) * torch.ones(x.shape).to(x.device))
+        corrupted_x = torch.where(should_swap == 1, x[torch.randperm(x.shape[0])], x)
+        mask = (corrupted_x != x).float()
+        return corrupted_x

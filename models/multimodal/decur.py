@@ -1,38 +1,37 @@
 # Note: The model and training settings do not follow the reference settings
 # from the paper. The settings are chosen such that the example can easily be
 # run on a small dataset with a single GPU.
-from typing import List, Tuple, Dict, Any
-from torch import Tensor
+from typing import List, Tuple
 import torch
-from torch import nn
-from models.backbones.model import S2Backbone, S5Backbone, TabularNet
-from models.backbones.decur_projector import DeCURProjector
-from models.backbones.aqr_projector import AQRProjector
+from torch import nn, Tensor
+from models.backbones.model import S2Backbone, S5Backbone
+from models.backbones.projector.decur_projector import MMAQProjector
 from losses import DeCURLoss
 from flash.core.optimizers import LARS
-from pytorch_lightning import LightningModule
 from utils.benchmarking.online_regressor import OnlineLinearRegressor
 from lightly.utils.scheduler import CosineWarmupScheduler
 from lightly.models.utils import get_weight_decay_parameters
 
+from models.multimodal.base import BaseMultimodalModel
 
-class DeCUR(LightningModule):
+class DeCUR(BaseMultimodalModel):
     def __init__(self, args, data_stats):
-        super().__init__()
-        self.args = args
-        self.encoder1 = S2Backbone(args)
-        self.encoder2 = S5Backbone(args)
-        sizes = [self.args.imaging_embedding] + list(map(int, '8192-8192-8192'.split('-')))
-        self.projector1 = DeCURProjector(sizes)
-        self.projector2 = DeCURProjector(sizes)
+        super().__init__(args, data_stats)
+        self.online_regressor = OnlineLinearRegressor(feature_dim=self.pooled_dim * 2, datastats=data_stats)
+
+    def _build_backbones(self):
+        self.encoder1 = S2Backbone(self.args)
+        self.encoder2 = S5Backbone(self.args)
         self.pooled_dim = 2048          
 
-        # normalization layer for the representations z1 and z2
+    def _build_projectors(self):
+        sizes = [self.args.imaging_embedding] + list(map(int, '8192-8192-8192'.split('-')))
+        self.projector1 = MMAQProjector(sizes)
+        self.projector2 = MMAQProjector(sizes)
         self.bn = nn.BatchNorm1d(sizes[-1], affine=False)
 
-        self.criterion = DeCURLoss(args, self.bn)
-
-        self.online_regressor = OnlineLinearRegressor(feature_dim =self.pooled_dim*2, datastats=data_stats)
+    def _build_losses(self):
+        self.criterion = DeCURLoss(self.args, self.bn)
 
 
     def forward(self, x: Tensor) -> Tensor:

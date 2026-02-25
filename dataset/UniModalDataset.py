@@ -1,13 +1,12 @@
 from torch.utils.data import Dataset
 import pandas as pd
-import torch
 import numpy as np
 from tqdm import tqdm
 import os
 import xarray as xr
 from torchvision.transforms import transforms
 from PIL import Image
-from rasterio.plot import reshape_as_image
+from utils.data_utils import normalize_for_display
 
 
 class UniModalRGBDataset(Dataset):
@@ -41,18 +40,12 @@ class UniModalRGBDataset(Dataset):
             s5p_data.close()
         return samples, stations
 
-    def _normalize_for_display(self, band_data):
-        band_data = reshape_as_image(np.array(band_data))
-        lower_perc = np.percentile(band_data, 2, axis=(0,1))
-        upper_perc = np.percentile(band_data, 98, axis=(0,1))
-        return (band_data - lower_perc) / (upper_perc - lower_perc)
-        
 
     def __getitem__(self, index: int):
         sample = self.samples[index]
         if self.stations is not None:
             sample["img"] = self.stations.get(sample["AirQualityStation"])
-            sample["img"] = self._normalize_for_display(sample["img"]).transpose(0, 2, 1)
+            sample["img"] = normalize_for_display(sample["img"]).transpose(0, 2, 1)
 
             #extract RGB bands
             rgb_image = sample["img"][:, :, [0, 1, 2]]

@@ -32,34 +32,6 @@ class PearsonCorrelation(nn.Module):
         pc_matrix = -inv_sqrt_cxx.view(-1, 1) * cov_xy * inv_sqrt_cyy.view(1, -1)
         pc_matrix = pc_matrix @ cov_yz * inv_sqrt_czz.view(-1, 1)
         return pc_matrix
-        # data = pc_matrix.cat([x, y, z], dim=-1)
-        # # Compute the covariance matrix manually
-        # data_centered = data - torch.mean(data, dim=0, keepdim=True)
-        # cov_matrix = torch.matmul(data_centered.t(), data_centered) / (data.size(0) - 1)
-        # # correlation_matrix = torch.nn.functional.correlation_matrix(data, data)
-
-        # diag_xx = torch.diag_embed(torch.sqrt(torch.diag(cov_matrix[:x.size(-1)])))
-        # diag_yy = torch.diag_embed(torch.sqrt(torch.diag(cov_matrix[x.size(-1):x.size(-1) + y.size(-1)])))
-        # diag_zz = torch.diag_embed(torch.sqrt(torch.diag(cov_matrix[-z.size(-1):])))
-
-        # # Compute the inverse square roots of the diagonal matrices
-        # inv_sqrt_cxx = torch.inverse(diag_xx.double())
-        # inv_sqrt_cyy = torch.inverse(diag_yy.double())
-        # inv_sqrt_czz = torch.inverse(diag_zz.double())
-
-        # print(inv_sqrt_cxx.shape, inv_sqrt_cyy.shape, inv_sqrt_czz.shape)
-
-        # # Compute the partial correlation matrix
-        # pc_matrix = -inv_sqrt_cxx.contiguous().view(-1, 1) @ cov_matrix[:x.size(-1), x.size(-1):x.size(-1) + y.size(-1)] @ inv_sqrt_cyy.contiguous().view(1, -1)
-        # pc_matrix = pc_matrix.squeeze()  # Remove extra singleton dimension
-        # pc_matrix = pc_matrix @ cov_matrix[x.size(-1):x.size(-1) + y.size(-1), -z.size(-1):] @ inv_sqrt_czz.contiguous().view(-1, 1)
-
-        # print(pc_matrix.shape)
-        
-        # # Ensure the resulting pc_matrix has size [512, 512]
-        # pc_matrix = pc_matrix[:x.size(-1), -z.size(-1):]
-
-        # return pc_matrix
 
     def forward(self, x, y, z):
         # Mean-center the inputs

@@ -9,27 +9,15 @@ import torch.nn as nn
 import torchmetrics
 from sklearn.linear_model import LinearRegression
 import pytorch_lightning as pl
+from models.multimodal.base import BaseMultimodalModel
 from lightly.models.modules import BarlowTwinsProjectionHead
 from models.backbones.model import TabularNet, ImagingNet
 from flash.core.optimizers import LinearWarmupCosineAnnealingLR
 from losses import select_loss_imaging, select_loss_tabular, Multimodal_Loss
 
 
-class MM_BarlowTwins(pl.LightningModule):
-    """Implementation of the BYOL architecture.
-
-    Attributes:
-        backbone:
-            Backbone model to extract features from images.
-        num_ftrs:
-            Dimension of the embedding (before the projection mlp).
-        hidden_dim:
-            Dimension of the hidden layer in the projection and prediction mlp.
-        out_dim:
-            Dimension of the output (after the projection/prediction mlp).
-        m:
-            Momentum for the momentum update of encoder.
-    """
+class MM_BarlowTwins(BaseMultimodalModel):
+    """Implementation of the BarlowTwins architecture."""
 
     def __init__(
         self,
@@ -38,25 +26,10 @@ class MM_BarlowTwins(pl.LightningModule):
         out_dim: int = 256,
         m: float = 0.9,
     ):
-        super(MM_BarlowTwins, self).__init__()
-        
-        self.args = args
-
-        self.encoder_imaging = ImagingNet(self.args)
-        # the architecture of the projection and prediction head is the same
-        self.pooled_dim = 2048
-        self.projector_imaging = BarlowTwinsProjectionHead(self.pooled_dim, hidden_dim, self.pooled_dim)
-
-        
-        # Tabular architecture of the projection and prediction head is the same
-        self.encoder_tabular = TabularNet(self.args)
-        self.projector_tabular = BarlowTwinsProjectionHead(self.args.embedding_dim, 
-                                                          self.args.embedding_dim*2, 
-                                                          self.args.projection_dim)
-        
-        self.initialize_training_losses()
-        
-        self.initialize_regressor_and_metrics()
+        self.hidden_dim = hidden_dim
+        self.out_dim = out_dim
+        self.m = m
+        super().__init__(args)
 
         warnings.warn(
             Warning(
@@ -66,6 +39,21 @@ class MM_BarlowTwins(pl.LightningModule):
             ),
             DeprecationWarning,
         )
+
+    def _build_backbones(self):
+        self.encoder_imaging = ImagingNet(self.args)
+        self.pooled_dim = 2048
+        self.encoder_tabular = TabularNet(self.args)
+
+    def _build_projectors(self):
+        self.projector_imaging = BarlowTwinsProjectionHead(self.pooled_dim, self.hidden_dim, self.pooled_dim)
+        self.projector_tabular = BarlowTwinsProjectionHead(self.args.embedding_dim, self.args.embedding_dim*2, self.args.projection_dim)
+
+    def _build_losses(self):
+        self.initialize_training_losses()
+
+    def _build_metrics(self):
+        self.initialize_regressor_and_metrics()
         
     def forward_imaging(self, x: torch.Tensor) -> torch.Tensor:
         """

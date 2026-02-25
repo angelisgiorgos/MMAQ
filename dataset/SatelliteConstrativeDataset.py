@@ -148,33 +148,3 @@ class SatelliteContrastiveDataset(Dataset):
     def __len__(self) -> int:
         return len(self.data_tabular)
 
-
-# if __name__ == '__main__':
-#     from transforms import *
-#     data_stats = DatasetStatistics()
-#     tf = transforms.Compose([ChangeBandOrder(),
-#                             Normalize(data_stats),
-#                             RandomFlipTransform(),
-#                             LightenTransform(),
-#                             DarkenTransform(),
-#                             UpScaleTransform(),
-#                             Randomize(),
-#                             ToTensor(),
-#                             Resize(224)])
-
-
-#     default_tf = transforms.Compose([ChangeBandOrder(), Normalize(data_stats), ToTensor(),  Resize(224)])
-
-#     constrativedataset = SatelliteContrastiveDataset(data_path= '/data/angelisg/sociobee/Multi-modal-NO2/datasets',
-#                                                     datapath_tabular = '/data/angelisg/sociobee/Multi-modal-NO2/datasets/data/editted/samples_multimodal_3polls.csv',
-#                                                     augmentation=tf,
-#                                                     augmentation_rate=0.2,
-#                                                     corruption_rate=0.5,
-#                                                     transforms=default_tf)
-
-
-#     loader = torch.utils.data.DataLoader(constrativedataset, shuffle=False, num_workers=0, batch_size=3)
-    
-#     for i,k,k in loader:
-#         print(i)
-#         break

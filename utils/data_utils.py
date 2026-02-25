@@ -36,3 +36,32 @@ def split_samples_df(samples, test_size=0.2):
     samples_test = samples[samples.AirQualityStation.isin(stations_test)]
 
     return samples_train, samples_test
+
+
+def normalize_for_display(band_data):
+    from rasterio.plot import reshape_as_image
+    import numpy as np
+    
+    band_data = reshape_as_image(np.array(band_data))
+    lower_perc = np.percentile(band_data, 2, axis=(0, 1))
+    upper_perc = np.percentile(band_data, 98, axis=(0, 1))
+    return (band_data - lower_perc) / (upper_perc - lower_perc)
+
+
+def normalize_to_uint8(data, min_percentile=2, max_percentile=98):
+    import numpy as np
+    
+    # Calculate the clipping range using percentiles
+    min_val = np.percentile(data, min_percentile)
+    max_val = np.percentile(data, max_percentile)
+    
+    # Clip the data to the specified range
+    clipped_data = np.clip(data, min_val, max_val)
+    
+    # Normalize the data to 0-1
+    normalized_data = (clipped_data - min_val) / (max_val - min_val)
+    
+    # Scale the data to 0-255
+    uint8_data = (normalized_data * 255).astype(np.uint8)
+    
+    return uint8_data

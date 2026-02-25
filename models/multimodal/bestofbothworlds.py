@@ -1,9 +1,7 @@
 from typing import List, Tuple, Dict
 import torch
-import torch.nn as nn
 from torch import Tensor
-import torch
-from pytorch_lightning import LightningModule
+from models.multimodal.base import BaseMultimodalModel
 from losses.clip_loss import CLIPLoss
 from models.backbones.model import S2Backbone
 from lightly.models.modules import SimCLRProjectionHead
@@ -13,25 +11,27 @@ from flash.core.optimizers import LinearWarmupCosineAnnealingLR
 from lightly.models.utils import get_weight_decay_parameters
 
 
-class BestofBothWorlds(LightningModule):
+class BestofBothWorlds(BaseMultimodalModel):
     """Implementation of the paper "Multimodal Contrastive Learning with Tabular and Imaging Data" for Air Quality Data
 
     Args:
         LightningModule (_type_): _description_
     """    
     def __init__(self, args, data_stats) -> None:
-        super(BestofBothWorlds, self).__init__()
-        self.data_stats = data_stats
-        self.args = args
-        self.criterion = CLIPLoss(temperature=0.1, lambda_0=0.5)
-        self.backbone = S2Backbone(args)
-        self.pooled_dim = 2048
-        self.projector_imaging = SimCLRProjectionHead(self.pooled_dim, self.args.embedding_dim, self.args.projection_dim)
+        super().__init__(args, data_stats)
+        self.online_regressor = OnlineLinearRegressor(self.data_stats, feature_dim=self.pooled_dim)
 
+    def _build_backbones(self):
+        self.backbone = S2Backbone(self.args)
         self.encoder_tabular = TabularNet(self.args)
+        self.pooled_dim = 2048
+
+    def _build_projectors(self):
+        self.projector_imaging = SimCLRProjectionHead(self.pooled_dim, self.args.embedding_dim, self.args.projection_dim)
         self.projector_tabular = SimCLRProjectionHead(self.args.embedding_dim, self.args.embedding_dim, self.args.projection_dim)
 
-        self.online_regressor = OnlineLinearRegressor(self.data_stats, feature_dim =self.pooled_dim)
+    def _build_losses(self):
+        self.criterion = CLIPLoss(temperature=0.1, lambda_0=0.5)
 
 
     def forward_imaging(self, x: Tensor) -> Tensor:

@@ -11,6 +11,7 @@ import torch.nn as nn
 import torchmetrics
 from sklearn.linear_model import LinearRegression
 import pytorch_lightning as pl
+from models.multimodal.base import BaseMultimodalModel
 from lightly.models.modules import BYOLProjectionHead
 from models.backbones.model import TabularNet, ImagingNet
 from flash.core.optimizers import LinearWarmupCosineAnnealingLR
@@ -46,21 +47,8 @@ def _do_momentum_update(prev_params, params, m):
         prev_param.data = prev_param.data * m + param.data * (1.0 - m)
 
 
-class MM_BYOL(pl.LightningModule):
-    """Implementation of the BYOL architecture.
-
-    Attributes:
-        backbone:
-            Backbone model to extract features from images.
-        num_ftrs:
-            Dimension of the embedding (before the projection mlp).
-        hidden_dim:
-            Dimension of the hidden layer in the projection and prediction mlp.
-        out_dim:
-            Dimension of the output (after the projection/prediction mlp).
-        m:
-            Momentum for the momentum update of encoder.
-    """
+class MM_BYOL(BaseMultimodalModel):
+    """Implementation of the BYOL architecture."""
 
     def __init__(
         self,
@@ -69,40 +57,10 @@ class MM_BYOL(pl.LightningModule):
         out_dim: int = 256,
         m: float = 0.9,
     ):
-        super(MM_BYOL, self).__init__()
-        
-        self.args = args
-
-        self.encoder_imaging = ImagingNet(self.args)
-        # the architecture of the projection and prediction head is the same
-        self.pooled_dim = 2048
-        self.projector_imaging = BYOLProjectionHead(self.pooled_dim, hidden_dim, out_dim)
-        self.prediction_imaging = BYOLProjectionHead(out_dim, hidden_dim, out_dim)
-        self.encoder_imaging_momentum = copy.deepcopy(self.encoder_imaging)
-        self.projector_imaging_momentum = copy.deepcopy(self.projector_imaging)
-
-        _deactivate_requires_grad(self.encoder_imaging_momentum.parameters())
-        _deactivate_requires_grad(self.projector_imaging_momentum.parameters())
-        
-        # Tabular architecture of the projection and prediction head is the same
-        self.encoder_tabular = TabularNet(self.args)
-        self.projector_tabular = BYOLProjectionHead(self.args.embedding_dim, 
-                                                          self.args.embedding_dim*2, 
-                                                          self.args.projection_dim)
-        self.predictor_tabular = BYOLProjectionHead(self.args.projection_dim, 
-                                                          self.args.embedding_dim*2, 
-                                                          self.args.projection_dim)
-        self.encoder_tabular_momentum = copy.deepcopy(self.encoder_tabular)
-        self.projector_tabular_momentum = copy.deepcopy(self.projector_tabular)
-        
-        _deactivate_requires_grad(self.encoder_tabular_momentum.parameters())
-        _deactivate_requires_grad(self.projector_tabular_momentum.parameters())
-        
+        self.hidden_dim = hidden_dim
+        self.out_dim = out_dim
         self.m = m
-        
-        self.initialize_training_losses()
-        
-        self.initialize_regressor_and_metrics()
+        super().__init__(args)
 
         warnings.warn(
             Warning(
@@ -112,6 +70,34 @@ class MM_BYOL(pl.LightningModule):
             ),
             DeprecationWarning,
         )
+
+    def _build_backbones(self):
+        self.encoder_imaging = ImagingNet(self.args)
+        self.pooled_dim = 2048
+        self.encoder_tabular = TabularNet(self.args)
+
+        self.encoder_imaging_momentum = copy.deepcopy(self.encoder_imaging)
+        self.encoder_tabular_momentum = copy.deepcopy(self.encoder_tabular)
+        _deactivate_requires_grad(self.encoder_imaging_momentum.parameters())
+        _deactivate_requires_grad(self.encoder_tabular_momentum.parameters())
+
+    def _build_projectors(self):
+        self.projector_imaging = BYOLProjectionHead(self.pooled_dim, self.hidden_dim, self.out_dim)
+        self.prediction_imaging = BYOLProjectionHead(self.out_dim, self.hidden_dim, self.out_dim)
+        
+        self.projector_tabular = BYOLProjectionHead(self.args.embedding_dim, self.args.embedding_dim*2, self.args.projection_dim)
+        self.predictor_tabular = BYOLProjectionHead(self.args.projection_dim, self.args.embedding_dim*2, self.args.projection_dim)
+
+        self.projector_imaging_momentum = copy.deepcopy(self.projector_imaging)
+        self.projector_tabular_momentum = copy.deepcopy(self.projector_tabular)
+        _deactivate_requires_grad(self.projector_imaging_momentum.parameters())
+        _deactivate_requires_grad(self.projector_tabular_momentum.parameters())
+
+    def _build_losses(self):
+        self.initialize_training_losses()
+
+    def _build_metrics(self):
+        self.initialize_regressor_and_metrics()
     
     
     @torch.no_grad()

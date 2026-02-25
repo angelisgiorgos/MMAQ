@@ -17,14 +17,6 @@ def create_logdir(name: str, wandb_logger):
 
 
 def undo_normalization(pred, target, datastats):
-  # if isinstance(pred, np.ndarray):
-  #   pred = pred
-  # elif isinstance(pred, torch.Tensor):
-  #   pred = pred.float().cpu().numpy()
-  # if isinstance(target, np.ndarray):
-  #   target = target
-  # elif isinstance(target, torch.Tensor):
-    # target = target.float().cpu().numpy()
   pred = Normalize.undo_no2_standardization(datastats, pred)
   target = Normalize.undo_no2_standardization(datastats, target)
   return pred, target
