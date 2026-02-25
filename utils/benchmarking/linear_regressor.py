@@ -1,0 +1,361 @@
+from typing import Any, Dict, List, Tuple, Union
+import os
+import sys
+import torch
+from pytorch_lightning import LightningModule
+from torch import Tensor
+from torch.nn import MSELoss, Linear, Module
+from torch.optim import SGD, Optimizer
+from utils import create_logdir
+import torchmetrics
+from lightly.utils.scheduler import CosineWarmupScheduler
+from pytorch_lightning.loggers import WandbLogger
+from lightly.utils.benchmarking import MetricCallback
+from pytorch_lightning.callbacks import (
+    ModelCheckpoint,
+    LearningRateMonitor,
+)
+from pytorch_lightning import Trainer
+from models import build_ssl_model
+from utils.utils import undo_normalization
+from losses.supervised_rlp import RandomLinearProjection
+from losses.contrastive_supervised import ContrastiveRegressionLoss
+from losses.ordinal_entropy import OrdinalEntropy
+
+
+
+class LinearRegressor(LightningModule):
+    def __init__(
+        self,
+        args,
+        data_stats,
+        model: Module,
+        regression_head: Module,
+        batch_size_per_device: int,
+        feature_dim: int = 2048,
+        freeze_model: bool = False,
+    ) -> None:
+        """Linear regressor for benchmarking.
+
+        Settings based on SimCLR [0].
+
+        - [0]: https://arxiv.org/abs/2002.05709
+
+        Args:
+            model:
+                Model used for feature extraction. Must define a forward(images) method
+                that returns a feature tensor.
+            batch_size_per_device:
+                Batch size per device.
+            feature_dim:
+                Dimension of features returned by forward method of model.
+            freeze_model:
+                If True, the model is frozen and only the regression_head head is
+                trained. This corresponds to the linear eval setting. Set to False for
+                finetuning.
+
+        Examples:
+
+            >>> from pytorch_lightning import Trainer
+            >>> from torch import nn
+            >>> import torchvision
+            >>> from lightly.models import LinearClassifier
+            >>> from lightly.modles.modules import SimCLRProjectionHead
+            >>>
+            >>> class SimCLR(nn.Module):
+            >>>     def __init__(self):
+            >>>         super().__init__()
+            >>>         self.backbone = torchvision.models.resnet18()
+            >>>         self.backbone.fc = nn.Identity() # Ignore regression_head layer
+            >>>         self.projection_head = SimCLRProjectionHead(512, 512, 128)
+            >>>
+            >>>     def forward(self, x):
+            >>>         # Forward must return image features.
+            >>>         features = self.backbone(x).flatten(start_dim=1)
+            >>>         return features
+            >>>
+            >>> # Initialize a model.
+            >>> model = SimCLR()
+            >>>
+            >>> # Wrap it with a LinearClassifier.
+            >>> linear_classifier = LinearClassifier(
+            >>>     model,
+            >>>     batch_size=256,
+            >>>     num_classes=10,
+            >>>     freeze_model=True, # linear evaluation, set to False for finetune
+            >>> )
+            >>>
+            >>> # Train the linear classifier.
+            >>> trainer = Trainer(max_epochs=90)
+            >>> trainer.fit(linear_classifier, train_dataloader, val_dataloader)
+
+        """
+        super().__init__()
+        self.args = args
+        self.data_stats = data_stats
+        self.save_hyperparameters(ignore="model")
+
+        self.model = model
+        self.batch_size_per_device = batch_size_per_device
+        if args.model == "decur":
+            feature_dim = feature_dim*2
+        self.feature_dim = feature_dim
+        self.freeze_model = freeze_model
+
+        self.regression_head = regression_head
+        self.init_criterion()
+
+        self.test_preds = []
+        self.test_targets = []
+
+        self.val_preds = []
+        self.val_targets = []
+
+        self.mae = torchmetrics.MeanAbsoluteError()
+        self.mape = torchmetrics.MeanAbsolutePercentageError()
+        self.r2 = torchmetrics.R2Score()
+        self.mse = torchmetrics.MeanSquaredError()
+
+    def init_criterion(self):
+        if self.args.finetune_loss == "mse":
+            self.criterion = MSELoss()
+        elif self.args.finetune_loss == "rlp":
+            self.criterion = RandomLinearProjection(self.args)
+        elif self.args.finetune_loss == "contrastive_regression":
+            self.criterion = ContrastiveRegressionLoss(self.args)
+        elif self.args.finetune_loss == "ordinal":
+            self.criterion = OrdinalEntropy(self.args)
+
+    def forward(self, images: Tensor, tabular: Tensor = None) -> Tensor:
+        if self.freeze_model:
+            with torch.no_grad():
+                if self.args.model == "mmcl" or self.args.model == "mmaq":
+                    features = self.model.forward(images, tabular).flatten(start_dim=1)
+                else:
+                    features = self.model.forward(images).flatten(start_dim=1)
+        else:
+            if self.args.model == "mmcl" or self.args.model == "mmaq":
+                features = self.model.forward(images, tabular).flatten(start_dim=1)
+            else:
+                features = self.model.forward(images).flatten(start_dim=1)
+        output: Tensor = self.regression_head(features)
+        return output, features
+
+
+    def calculate_loss(self, features, targets, labels):
+        if not self.args.finetune_loss == "mse":
+            loss = self.criterion(features, targets, labels)
+        else:
+            loss = self.criterion(targets, labels)
+        return loss
+
+
+    def shared_step(
+        self, batch: Tuple[Tensor, ...], batch_idx: int
+    ):
+
+        if self.args.datatype == "rgb_unimodal":
+            image, targets = batch
+            predictions, features = self.forward(image)
+        else:
+            im_views, tab_views, targets = batch
+            predictions, features = self.forward(im_views, tab_views.float())
+        targets = targets.float().unsqueeze(1)
+        loss = self.calculate_loss(features, targets, predictions)
+        predictions, targets = undo_normalization(predictions.detach(), targets, self.data_stats)
+        # metrics = {"mae" : self.mae(predictions, targets), "mse": self.mse(predictions, targets), "mape": self.mape(predictions, targets), "r2": self.r2(predictions, targets)}
+        return 1e-3 * loss, predictions, targets
+
+
+    def training_step(self, batch: Tuple[Tensor, ...], batch_idx: int) -> Tensor:
+        loss, predictions, targets = self.shared_step(batch=batch, batch_idx=batch_idx)
+        metrics = {"mae" : self.mae(predictions, targets), "mse": self.mse(predictions, targets), "mape": self.mape(predictions, targets), "r2": self.r2(predictions, targets)}
+        batch_size = len(batch[1])
+        log_dict = {f"train_{k}": acc for k, acc in metrics.items()}
+        self.log(
+            "train_loss", loss, on_epoch=True, prog_bar=True, sync_dist=True, batch_size=batch_size
+        )
+        self.log_dict(log_dict, sync_dist=True, batch_size=batch_size)
+
+        return loss
+
+    def validation_step(self, batch: Tuple[Tensor, ...], batch_idx: int) -> Tensor:
+        loss, predictions, targets = self.shared_step(batch=batch, batch_idx=batch_idx)
+        batch_size = len(batch[1])
+        # log_dict.update({f"val_online_{k}": acc for k, acc in metrics.items()})
+        self.log("val_loss", loss, prog_bar=True, sync_dist=True, batch_size=batch_size)
+        
+        self.val_preds.append(predictions.clone().detach())
+        self.val_targets.append(targets)
+        return loss
+    
+
+    def validation_epoch_end(self, outputs):
+        val_loss = torch.stack(outputs).mean()
+        preds = torch.cat(self.val_preds, dim=0)
+        targets = torch.cat(self.val_targets, dim=0)
+
+        metrics = {
+            "mae": self.mae(preds, targets),
+            "mape": self.mape(preds, targets),
+            "r2": self.r2(preds, targets),
+            "mse": self.mse(preds, targets)
+        }
+
+        self.log("val_loss", val_loss, prog_bar=True)
+        self.log_dict({f"val_{k}": acc for k, acc in metrics.items()}, prog_bar=True)
+
+
+    def test_step(self, batch: Tuple[Tensor, ...], batch_idx: int) -> Tensor:
+        loss, predictions, targets = self.shared_step(batch=batch, batch_idx=batch_idx)
+       
+        self.test_preds.append(predictions.detach())
+        self.test_targets.append(targets)
+        return loss
+    
+    
+    def test_epoch_end(self, outputs):
+
+        test_loss = torch.stack(outputs).mean()
+        preds = torch.cat(self.test_preds, dim=0)
+        targets = torch.cat(self.test_targets, dim=0)
+
+        preds, targets = undo_normalization(preds, targets, self.data_stats)
+
+        metrics = {
+            "mae": self.mae(preds, targets),
+            "mape": self.mape(preds, targets),
+            "r2": self.r2(preds, targets),
+            "mse": self.mse(preds, targets)
+        }
+
+        self.log("test_loss", test_loss, prog_bar=True)
+        self.log_dict({f"test_{k}": acc for k, acc in metrics.items()}, prog_bar=True)
+
+
+    def configure_optimizers(
+        self,
+    ) -> Tuple[List[Optimizer], List[Dict[str, Union[Any, str]]]]:
+        parameters = list(self.regression_head.parameters())
+        if not self.freeze_model:
+            print(self.model.parameters())
+            parameters += self.model.parameters()
+        optimizer = SGD(
+            parameters,
+            lr=self.args.lr * self.batch_size_per_device * self.trainer.world_size / 256,
+            momentum=self.args.momentum,
+            weight_decay=0.0,
+        )
+        scheduler = {
+            "scheduler": CosineWarmupScheduler(
+                optimizer=optimizer,
+                warmup_epochs=0,
+                max_epochs=int(self.trainer.estimated_stepping_batches),
+            ),
+            "interval": "step",
+        }
+        return [optimizer], [scheduler]
+
+    def on_train_epoch_start(self) -> None:
+        if self.freeze_model:
+            # Set model to eval mode to disable norm layer updates.
+            self.model.eval()
+
+
+def linear_eval(args,
+    train_dataloader: torch.utils.data.DataLoader,
+    val_dataloader: torch.utils.data.DataLoader,
+    data_stats) -> None:
+    print("Running linear evaluation...")
+
+    base_dir = os.path.dirname(os.path.abspath(sys.argv[0]))
+
+    wandb_logger = WandbLogger(
+        project=args.wandb_project,
+        save_dir=base_dir,
+        offline=args.offline,
+        config=args
+    )
+    
+
+    # Create logdir based on WandB run name
+    logdir = create_logdir(args.datatype, wandb_logger)
+
+    # Train linear classifier.
+    metric_callback = MetricCallback()
+
+    model = build_ssl_model(args, data_stats)
+    if args.ckpt_path is None:
+        ckpt_path = os.path.join("./checkpoints", args.model + ".ckpt")
+    else:
+        ckpt_path = args.ckpt_path
+    model.load_state_dict(torch.load(ckpt_path)["state_dict"], strict=False)
+
+    if hasattr(torch, "compile"):
+        # Compile model if PyTorch supports it.
+        model = torch.compile(model)
+
+
+    model_checkpoint = ModelCheckpoint(
+            filename="checkpoint_last_epoch_{epoch:02d}",
+            dirpath=logdir,
+            monitor="val_mae",
+            mode="min",
+            save_on_train_epoch_end=True,
+            auto_insert_metric_name=False,
+        )
+    callbacks=[
+            LearningRateMonitor(),
+            metric_callback,
+            model_checkpoint,
+            ]
+
+    trainer = Trainer.from_argparse_args(
+        args,
+        accelerator="gpu",
+        devices=1,
+        precision=32,
+        deterministic=True,
+        callbacks=callbacks,
+        logger=wandb_logger,
+        max_epochs=args.max_num_epochs,
+        check_val_every_n_epoch=args.check_val_every_n_epoch,
+        limit_train_batches=args.limit_train_batches,
+        limit_val_batches=args.limit_val_batches,
+        enable_progress_bar=args.enable_progress_bar,
+    )
+
+    feature_dim = 2048
+    if args.model == "decur":
+        feature_dim = feature_dim*2
+    elif args.model == "mmaq":
+        feature_dim = feature_dim*2
+    elif args.model == "dino":
+        feature_dim = 768
+
+    
+    
+    regression_head = Linear(feature_dim, 1)
+
+
+    regressor = LinearRegressor(
+        args=args,
+        data_stats=data_stats,
+        model=model,
+        regression_head=regression_head,
+        batch_size_per_device=args.batch_size,
+        feature_dim=feature_dim,
+        freeze_model=True,
+    )
+
+    trainer.fit(
+        model=regressor,
+        train_dataloaders=train_dataloader,
+        val_dataloaders=val_dataloader,
+    )
+
+    CKPT_PATH = model_checkpoint.best_model_path
+    print(CKPT_PATH)
+    checkpoint = torch.load(CKPT_PATH)
+    regressor.load_state_dict(checkpoint["state_dict"])
+    trainer.test(ckpt_path="best", dataloaders=val_dataloader)
