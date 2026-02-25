@@ -1,6 +1,6 @@
 from .multimodal.mm_byol import MM_BYOL
 from .multimodal.bestofbothworlds import BestofBothWorlds
-from .multimodal.multimodalssl import MultimodalContrastiveSimCLR
+from .multimodal.multimodalsimclr import MultimodalContrastiveSimCLR
 from .multimodal.mm_barlow_twins import MM_BarlowTwins
 from .multimodal.decur import DeCUR
 from .simclr import SimCLR
@@ -18,9 +18,9 @@ def build_ssl_model(args, data_stats):
         model = BestofBothWorlds(args, data_stats)
     elif args.model == "mmbyol":
         model = MM_BYOL(args)
-    elif args.model == "mm_con":
+    elif args.model in ["mm_con", "mmsimclr"]:
         model = MultimodalContrastiveSimCLR(args)
-    elif args.model == "mm_barlow_twins":
+    elif args.model in ["mm_barlow_twins", "mm_bar"]:
         model = MM_BarlowTwins(args)
     elif args.model == "decur":
         model = DeCUR(args, data_stats)
@@ -40,4 +40,6 @@ def build_ssl_model(args, data_stats):
         model = MMAQ(args, data_stats)
     elif args.model == "dino":
         model = DINO(args, data_stats)
+    else:
+        raise ValueError(f"Unknown model: {args.model}")
     return model

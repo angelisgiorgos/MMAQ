@@ -1,10 +1,5 @@
-"""
-
-"""
 import torch
 import torch.nn.functional as F
-import random
-import numpy as np
 from torch import nn
 from torch.nn import MSELoss
 
@@ -45,9 +40,7 @@ class OrdinalEntropy(nn.Module):
         _weight = ((_weight - _min) / _max)
 
         _distance = _distance * _weight
-        _entropy = torch.mean(_distance)
-
-        
+        _entropy = torch.mean(_distance)      
 
         _features_center = p[u_index, :]
         _features = features - _features_center

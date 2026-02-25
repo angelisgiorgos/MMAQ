@@ -27,7 +27,7 @@ class BaseOptions:
         parser.add_argument('--channels', type=int, default=12, help='Channels dimension form main sentinel backbone')
         parser.add_argument('--fusion_type', type=str, default='late', help='Fusion level for images')
         # model parameters
-        parser.add_argument('--model', type=str, default='simclr', help='chooses which model to use. [mmsimclr | mmbyol | mm_con ]')
+        parser.add_argument('--model', type=str, default='mmaq', help='chooses which model to use. [mmsimclr | mmbyol | mm_con ]')
         parser.add_argument('--network', type=str, default='resnet50', help='specify generator architecture [resnet50 | vit_b16 | vit_b32 | vit_l16 | vit_l32]')
         parser.add_argument('--s5pnet', type=str, default='resnet50', help='specify generator architecture [initial | resnet50 | vit_b16 | vit_b32 | vit_l16 | vit_l32]')
         parser.add_argument('--n_layers_tabular', type=int, default=3, help='only used if netD==n_layers')

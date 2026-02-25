@@ -3,7 +3,7 @@ from typing import List, Tuple
 
 import torch
 import torchmetrics
-from pytorch_lightning import LightningModule
+from lightning.pytorch import LightningModule
 from torch.nn import Identity
 from torch.optim import SGD
 from torchvision.models import resnet50
@@ -18,7 +18,6 @@ from lightly.models.utils import (
 )
 from lightly.utils.scheduler import CosineWarmupScheduler, cosine_schedule
 from utils.benchmarking.online_regressor import OnlineLinearRegressor
-from pytorch_lightning.utilities.apply_func import move_data_to_device
 
 class DINO(LightningModule):
     def __init__(self, args, data_stats) -> None:
@@ -122,15 +121,10 @@ class DINO(LightningModule):
         self.val_targets.append(targets)
         return regr_loss
     
-    def validation_epoch_end(self, outputs):
+    def on_validation_epoch_end(self):
         val_loss = torch.stack(outputs).mean()
         preds = torch.cat([pred.to(self.mae.device) for pred in self.val_preds], dim=0)
         targets = torch.cat([target.to(self.mae.device) for target in self.val_targets], dim=0)
-
-        # self.mae = move_data_to_device(self.mae, self.device)
-        # self.mape = self.mape()
-        # self.r2 = self.r2
-        # self.mse = self.mse
 
         metrics = {
             "mae": self.mae(preds, targets),

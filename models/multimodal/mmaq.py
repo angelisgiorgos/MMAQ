@@ -2,7 +2,7 @@ import torch
 import torchmetrics
 from torch import nn, Tensor
 from models.backbones.model import S2Backbone, S5Backbone
-from models.backbones.projector.mmaq_projector import MMAQProjector, AQRProjector
+from models.projector.mmaq_projector import MMAQProjector, AQRProjector
 from models.backbones.tabularnets import TabularAttention, DANet
 from losses.decur_loss import MultiModalDecur
 from losses.mixup import MixUPLoss
@@ -78,10 +78,10 @@ class MMAQ(BaseMultimodalModel):
         self.mixup = MixUPLoss(self.args, self.bn, 5.0, 0.005)
 
     def _build_metrics(self):
-        self.mae = torchmetrics.MeanAbsoluteError(dist_sync_on_step=True)
-        self.mape = torchmetrics.MeanAbsolutePercentageError(dist_sync_on_step=True)
-        self.r2 = torchmetrics.R2Score(dist_sync_on_step=True)
-        self.mse = torchmetrics.MeanSquaredError(dist_sync_on_step=True)
+        self.val_mae = torchmetrics.MeanAbsoluteError(dist_sync_on_step=True)
+        self.val_mape = torchmetrics.MeanAbsolutePercentageError(dist_sync_on_step=True)
+        self.val_r2 = torchmetrics.R2Score(dist_sync_on_step=True)
+        self.val_mse = torchmetrics.MeanSquaredError(dist_sync_on_step=True)
 
     # ============================================================
     # Forward
@@ -114,7 +114,10 @@ class MMAQ(BaseMultimodalModel):
 
         im_views, tab_views, targets, _ = batch
 
-        ims = torch.cat(im_views[:2], dim=0)
+        ims = {"img": torch.cat([v["img"] for v in im_views[:2]], dim=0)}
+        if "s5p" in im_views[0] and im_views[0]["s5p"] is not None:
+            ims["s5p"] = torch.cat([v["s5p"] for v in im_views[:2]], dim=0)
+
         tabs = torch.cat(tab_views[:2], dim=0)
 
         f1_all = self.encoder1(ims)
@@ -171,43 +174,55 @@ class MMAQ(BaseMultimodalModel):
         im_views, tab_views, targets, _ = batch
 
         features = self.forward(im_views[0], tab_views[0])
+
         regr_loss, preds, targets = self.online_regressor.validation_step(
             (features.detach(), targets), batch_idx
         )
 
-        self.val_preds.append(preds.detach())
-        self.val_targets.append(targets.detach())
+        # Update metrics (TorchMetrics handles accumulation internally)
+        self.val_mae.update(preds, targets)
+        self.val_mape.update(preds, targets)
+        self.val_r2.update(preds, targets)
+        self.val_mse.update(preds, targets)
 
-        return regr_loss
+        # Log step loss (proper DDP sync)
+        self.log(
+            "val_step_loss",
+            regr_loss,
+            prog_bar=False,
+            sync_dist=True,
+            batch_size=targets.size(0)
+        )
 
     def on_validation_epoch_start(self):
         self.val_preds.clear()
         self.val_targets.clear()
 
-    def validation_epoch_end(self, outputs):
-        val_loss = torch.stack(outputs).mean()
-
-        preds = torch.cat(self.val_preds, dim=0)
-        targets = torch.cat(self.val_targets, dim=0)
-
+    def on_validation_epoch_end(self):
+        # Compute metrics (aggregated across devices)
         metrics = {
-            "val_mae": self.mae(preds, targets),
-            "val_mape": self.mape(preds, targets),
-            "val_r2": self.r2(preds, targets),
-            "val_mse": self.mse(preds, targets),
+            "val_mae": self.val_mae.compute(),
+            "val_mape": self.val_mape.compute(),
+            "val_r2": self.val_r2.compute(),
+            "val_mse": self.val_mse.compute(),
         }
 
-        self.log("val_epoch_loss", val_loss, prog_bar=True)
-        self.log_dict(metrics, prog_bar=True, sync_dist=True)
+        # Log once (Lightning handles sync)
+        self.log_dict(
+            metrics,
+            prog_bar=True,
+            sync_dist=True
+        )
 
-        # reset metrics
-        for m in [self.mae, self.mape, self.r2, self.mse]:
-            m.reset()
+        # Reset metrics for next epoch
+        self.val_mae.reset()
+        self.val_mape.reset()
+        self.val_r2.reset()
+        self.val_mse.reset()
 
     # ============================================================
     # Optimizer
     # ============================================================
-
     def configure_optimizers(self):
 
         lr_factor = self.args.batch_size * self.trainer.world_size / 256

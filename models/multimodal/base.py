@@ -1,5 +1,5 @@
 import torch
-from pytorch_lightning import LightningModule
+from lightning.pytorch import LightningModule
 
 class BaseMultimodalModel(LightningModule):
     """

@@ -2,7 +2,7 @@ import math
 from typing import List, Tuple
 
 import torch
-from pytorch_lightning import LightningModule
+from lightning.pytorch import LightningModule
 from torch import Tensor
 from models.backbones.model import S2Backbone
 

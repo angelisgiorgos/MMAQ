@@ -20,6 +20,30 @@ This repository contains the official implementation of:
 }
 ```
 
+## Installation
+
+Create the environment with Python 3.11:
+```bash
+conda create -n mmaq python=3.11 -y
+```
+
+Activate it:
+```bash
+conda activate mmaq
+```
+
+Example: CUDA 11.8
+```bash
+pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118
+```
+
+> ⚠️ Install PyTorch before the rest of the requirements.
+
+And then install requirements:
+```bash
+pip install -r requirements.txt
+```
+
 ## Pretrained Checkpoints
 
 You can find the best performing pretrained checkpoint for the model here:  

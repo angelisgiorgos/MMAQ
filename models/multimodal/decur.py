@@ -5,7 +5,7 @@ from typing import List, Tuple
 import torch
 from torch import nn, Tensor
 from models.backbones.model import S2Backbone, S5Backbone
-from models.backbones.projector.decur_projector import MMAQProjector
+from models.projector.decur_projector import DeCURProjector
 from losses import DeCURLoss
 from flash.core.optimizers import LARS
 from utils.benchmarking.online_regressor import OnlineLinearRegressor
@@ -26,8 +26,8 @@ class DeCUR(BaseMultimodalModel):
 
     def _build_projectors(self):
         sizes = [self.args.imaging_embedding] + list(map(int, '8192-8192-8192'.split('-')))
-        self.projector1 = MMAQProjector(sizes)
-        self.projector2 = MMAQProjector(sizes)
+        self.projector1 = DeCURProjector(sizes)
+        self.projector2 = DeCURProjector(sizes)
         self.bn = nn.BatchNorm1d(sizes[-1], affine=False)
 
     def _build_losses(self):

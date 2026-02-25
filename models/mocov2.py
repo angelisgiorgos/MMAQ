@@ -2,7 +2,7 @@ import copy
 from typing import List, Tuple
 
 import torch
-from pytorch_lightning import LightningModule
+from lightning.pytorch import LightningModule
 from torch import Tensor
 from torch.nn import Identity
 from torch.optim import SGD

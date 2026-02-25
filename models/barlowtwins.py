@@ -2,7 +2,7 @@ import copy
 from typing import List, Tuple
 
 import torch
-from pytorch_lightning import LightningModule
+from lightning.pytorch import LightningModule
 from torch import Tensor
 from torch.nn import Identity
 from models.backbones.model import S2Backbone
@@ -74,7 +74,7 @@ class BarlowTwins(LightningModule):
         return regr_loss
 
     
-    def validation_epoch_end(self, outputs):
+    def on_validation_epoch_end(self):
         val_loss = torch.stack(outputs).mean()
         preds = torch.cat(self.val_preds, dim=0)
         targets = torch.cat(self.val_targets, dim=0)

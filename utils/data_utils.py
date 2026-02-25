@@ -1,4 +1,5 @@
 import pandas as pd
+import numpy as np
 from sklearn.model_selection import train_test_split
 
 
@@ -22,18 +23,21 @@ def split_samples(samples, stations, test_size=0.2, val_size=0.2):
                    'test':samples_val
                    }
         }
-
     return final_dict
 
 
 def split_samples_df(samples, test_size=0.2):
-    """split pd.DF s.t. all samples of a given station
-    are either in the train or test set """
-    stations = samples.AirQualityStation.unique()
-    stations_train, stations_test = train_test_split(stations, test_size=test_size)
+    stations = samples["AirQualityStation"].drop_duplicates().to_numpy()
 
-    samples_train = samples[samples.AirQualityStation.isin(stations_train)]
-    samples_test = samples[samples.AirQualityStation.isin(stations_test)]
+    stations_train, stations_test = train_test_split(
+        stations,
+        test_size=test_size,
+        random_state=42,
+        shuffle=True
+    )
+
+    samples_train = samples[samples["AirQualityStation"].isin(stations_train)]
+    samples_test = samples[samples["AirQualityStation"].isin(stations_test)]
 
     return samples_train, samples_test
 
@@ -49,7 +53,6 @@ def normalize_for_display(band_data):
 
 
 def normalize_to_uint8(data, min_percentile=2, max_percentile=98):
-    import numpy as np
     
     # Calculate the clipping range using percentiles
     min_val = np.percentile(data, min_percentile)

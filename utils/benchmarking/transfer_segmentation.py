@@ -1,17 +1,17 @@
 from typing import Any, Dict, List, Tuple, Union
 from lightly.utils.scheduler import CosineWarmupScheduler
-from pytorch_lightning.loggers import WandbLogger
+from lightning.pytorch.loggers import WandbLogger
 from lightly.utils.benchmarking import MetricCallback
-from pytorch_lightning import Trainer
+from lightning.pytorch import Trainer
 import os, sys
 from models import build_ssl_model
 from utils import create_logdir
-from pytorch_lightning.callbacks import (
+from lightning.pytorch.callbacks import (
     ModelCheckpoint,
     LearningRateMonitor,
 )
 from torch.optim import SGD, Optimizer, Adam
-import pytorch_lightning as pl
+import lightning.pytorch as pl
 import torchmetrics
 import torch
 from torch import nn
@@ -164,7 +164,7 @@ class Segmentation(pl.LightningModule):
         self.train_accuracy(preds, labels)
         return loss
 
-    def training_epoch_end(self, outs):
+    def on_train_epoch_end(self):
         self.log("train_iou", self.train_iou.compute())
         self.log("train_accuracy", self.train_accuracy.compute())
 
@@ -181,7 +181,7 @@ class Segmentation(pl.LightningModule):
         return loss
 
 
-    def validation_epoch_end(self, outs):
+    def on_validation_epoch_end(self):
         self.log("val_iou", self.val_iou.compute())
         self.log("val_accuracy", self.val_accuracy.compute())
 
@@ -286,8 +286,7 @@ def tf_segmentation(args,
             model_checkpoint,
             ]
 
-    trainer = Trainer.from_argparse_args(
-        args,
+    trainer = Trainer(
         accelerator="gpu",
         devices=1,
         precision=32,

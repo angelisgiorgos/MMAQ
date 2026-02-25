@@ -2,7 +2,7 @@ import math
 from typing import List, Tuple
 
 import torch
-from pytorch_lightning import LightningModule
+from lightning.pytorch import LightningModule
 from torch import Tensor
 from torch.nn import Identity, ModuleList
 from torch.nn import functional as F

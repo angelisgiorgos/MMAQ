@@ -41,7 +41,7 @@ def load_rgb_unimodal_datasets(args):
 
     if args.linear_eval:
         train_transform = T.Compose([
-            T.RandomResizedCrop(224),
+            T.RandomResizedCrop(args.img_size),
             T.RandomHorizontalFlip(),
             T.ToTensor(),
             T.Normalize(mean=IMAGENET_NORMALIZE["mean"], std=IMAGENET_NORMALIZE["std"]),
@@ -58,7 +58,7 @@ def load_rgb_unimodal_datasets(args):
 
     val_transform = T.Compose([
         T.Resize(256),
-        T.CenterCrop(224),
+        T.CenterCrop(args.img_size),
         T.ToTensor(),
         T.Normalize(mean=IMAGENET_NORMALIZE["mean"], std=IMAGENET_NORMALIZE["std"]),
     ])
@@ -103,8 +103,8 @@ def load_datasets(args):
         ChangeBandOrder(),
         Normalize(data_stats),
         ToTensor(),
-        RandomResizeCrop(size=224, scale=(0.08, 1.0)),
-        Resize(224)
+        RandomResizeCrop(size=args.img_size, scale=(0.08, 1.0)),
+        Resize(args.img_size)
     ])
     
     if args.linear_eval:
@@ -122,15 +122,15 @@ def load_datasets(args):
             RandomVerticalFlip(p=0.0),
             CustomColorJitter(brightness=0.2, contrast=0.2, saturation=0.2, hue=0.2),
             random_rotation_transform(rr_prob=0.0, rr_degrees=None),
-            RandomResizeCrop(size=224, scale=(0.08, 1.0)),
-            Resize(224),
+            RandomResizeCrop(size=args.img_size, scale=(0.08, 1.0)),
+            Resize(args.img_size),
         ])
 
     val_default_transforms = T.Compose([
         ChangeBandOrder(),
         Normalize(data_stats),
         ToTensor(),
-        Resize(224)
+        Resize(args.img_size)
     ])
     
     samples_df = args.samples_file if isinstance(args.samples_file, pd.DataFrame) else pd.read_csv(args.samples_file, index_col="idx")

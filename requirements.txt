@@ -1,12 +1,14 @@
 einops
 lightly
+h5netcdf
+lightning
 lightning-flash
 matplotlib
+netCDF4
 numpy
 opencv-python
 pandas
 Pillow
-pytorch-lightning
 rasterio
 rioxarray
 scikit-image
@@ -17,3 +19,4 @@ torchmetrics
 tqdm
 wandb
 xarray
+xarray[complete]

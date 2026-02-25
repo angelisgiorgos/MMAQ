@@ -9,8 +9,7 @@ from torch.utils.data import Dataset
 import pandas as pd
 from tqdm import tqdm
 import xarray as xr
-import rioxarray
-from .tabular_transforms import SwapNoiseCorrupter
+from dataset.transforms import SwapNoiseCorrupter
 
 
 

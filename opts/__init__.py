@@ -1,3 +1,2 @@
-from opts.training_opts import TrainOptions
-from opts.lineareval_opts import LinearEvalOptions
-from opts.tf_opts import TransferLearningOptions
+from opts.run_opts import RunOptions
+from opts.base_opts import BaseOptions

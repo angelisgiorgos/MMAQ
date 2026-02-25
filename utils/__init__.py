@@ -2,8 +2,7 @@ import torch
 import math
 import warnings
 from utils.data_utils import split_samples_df
-from utils.file_utils import none_or_true
-from utils.utils import create_logdir
+from utils.utils import create_logdir, none_or_true
 
 
 

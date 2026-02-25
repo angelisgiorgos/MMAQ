@@ -2,7 +2,7 @@ from typing import Any, Dict, List, Tuple, Union
 import os
 import sys
 import torch
-from pytorch_lightning import LightningModule
+from lightning.pytorch import LightningModule
 from torch import Tensor
 from torch.nn import MSELoss, Linear, Module
 
@@ -11,12 +11,12 @@ from torch.optim import SGD, Optimizer, Adam
 
 from lightly.utils.benchmarking.topk import mean_topk_accuracy
 from lightly.utils.scheduler import CosineWarmupScheduler
-from pytorch_lightning.loggers import WandbLogger
+from lightning.pytorch.loggers import WandbLogger
 from lightly.utils.benchmarking import MetricCallback
-from pytorch_lightning import Trainer
+from lightning.pytorch import Trainer
 from models import build_ssl_model
 from utils import create_logdir
-from pytorch_lightning.callbacks import (
+from lightning.pytorch.callbacks import (
     ModelCheckpoint,
     LearningRateMonitor,
 )
@@ -100,7 +100,7 @@ class TransferClassifier(LightningModule):
         return {"loss": loss, "topk": topk, "f1": f1}
 
 
-    def validation_epoch_end(self, outputs):
+    def on_validation_epoch_end(self):
         avg_loss = torch.stack([x['loss'] for x in outputs]).mean()
         avg_f1 = torch.stack([x['f1'] for x in outputs]).mean()
         self.log('avg_val_loss', avg_loss, prog_bar=True, sync_dist=True)
@@ -202,8 +202,7 @@ def tf_classification(args,
             model_checkpoint,
             ]
 
-    trainer = Trainer.from_argparse_args(
-        args,
+    trainer = Trainer(
         accelerator="gpu",
         devices=[1],
         precision=32,

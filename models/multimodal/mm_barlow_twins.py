@@ -6,13 +6,10 @@ import warnings
 import copy
 import torch
 import torch.nn as nn
-import torchmetrics
-from sklearn.linear_model import LinearRegression
-import pytorch_lightning as pl
 from models.multimodal.base import BaseMultimodalModel
 from lightly.models.modules import BarlowTwinsProjectionHead
 from models.backbones.model import TabularNet, ImagingNet
-from flash.core.optimizers import LinearWarmupCosineAnnealingLR
+
 from losses import select_loss_imaging, select_loss_tabular, Multimodal_Loss
 
 
@@ -30,6 +27,12 @@ class MM_BarlowTwins(BaseMultimodalModel):
         self.out_dim = out_dim
         self.m = m
         super().__init__(args)
+
+        # ---------- Evaluation Collect ----------
+        self.train_embeddings = []
+        self.train_labels = []
+        self.val_embeddings = []
+        self.val_labels = []
 
         warnings.warn(
             Warning(
@@ -82,8 +85,8 @@ class MM_BarlowTwins(BaseMultimodalModel):
         self.criterion_val = self.criterion_train
 
         
-    def training_step(self, batch: Tuple[List[torch.Tensor], List[torch.Tensor], torch.Tensor, torch.Tensor, List[torch.Tensor]], _) -> torch.Tensor:
-        im_views, tab_views, y, _ = batch
+    def training_step(self, batch: Tuple[List[torch.Tensor], List[torch.Tensor], torch.Tensor, torch.Tensor, List[torch.Tensor] | None], _) -> Any:
+        im_views, tab_views, y = batch[0], batch[1], batch[2]
         
         z0, embeddings_0 = self.forward_imaging(im_views[0])
         z1, _ = self.forward_imaging(im_views[1])
@@ -93,39 +96,33 @@ class MM_BarlowTwins(BaseMultimodalModel):
         z_t1, _ = self.forward_tabular(tab_views[1])
         loss = self.criterion_train(z0, z1, z_t0, z_t1)
         self.log(f"multimodal.train.loss", loss, on_epoch=True, on_step=False)
-        return {'loss':loss, 'embeddings': torch.cat([embeddings_0, temb_0], axis=1), 'labels': y}
+        
+        emb = torch.cat([embeddings_0, temb_0], dim=1)
+        self.train_embeddings.append(emb.detach())
+        self.train_labels.append(y.detach())
+        return {'loss': loss, 'embeddings': emb, 'labels': y}
 
 
-    def validation_step(self, batch: Tuple[List[torch.Tensor], List[torch.Tensor], torch.Tensor, torch.Tensor, List[torch.Tensor]], _) -> torch.Tensor:
+    def validation_step(self, batch: Tuple[List[torch.Tensor], List[torch.Tensor], torch.Tensor, torch.Tensor, List[torch.Tensor] | None], _) -> Any:
         """
         Validate contrastive model
         """
-        im_views, tab_views, y, _ = batch
+        im_views, tab_views, y = batch[0], batch[1], batch[2]
         z0, embeddings_0 = self.forward_imaging(im_views[0])
         z1, _ = self.forward_imaging(im_views[1])
         z_t0, temb_0 = self.forward_tabular(tab_views[0])
         z_t1, _ = self.forward_tabular(tab_views[1])
         loss = self.criterion_val(z0, z1, z_t0, z_t1)
         self.log("multimodal.val.loss", loss, on_epoch=True, on_step=False)
-        return {'sample_augmentation': im_views[1], 'embeddings': torch.cat([embeddings_0, temb_0], axis=1), 'labels': y}
+        
+        emb = torch.cat([embeddings_0, temb_0], dim=1)
+        self.val_embeddings.append(emb.detach())
+        self.val_labels.append(y.detach())
+        return {'sample_augmentation': im_views[1], 'embeddings': emb, 'labels': y}
 
-    
-    def stack_outputs(self, outputs: List[torch.Tensor]) -> torch.Tensor:
-        """
-        Stack outputs from multiple steps
-        """
-        labels = outputs[0]['labels']
-        embeddings = outputs[0]['embeddings']
-        for i in range(1, len(outputs)):
-            labels = torch.cat((labels, outputs[i]['labels']), dim=0)
-            embeddings = torch.cat((embeddings, outputs[i]['embeddings']), dim=0)
 
-        embeddings = embeddings.detach().cpu()
-        labels = labels.cpu()
 
-        return embeddings, labels
-
-    def initialize_scheduler(self, optimizer: torch.optim.Optimizer):
+    def initialize_scheduler(self, optimizer: Any):
         if self.args.scheduler == 'cosine':
             scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, 
                                                                    T_max=self.args.max_epochs, 
@@ -150,11 +147,11 @@ class MM_BarlowTwins(BaseMultimodalModel):
         self.mae_train = torchmetrics.MeanAbsoluteError()
         self.mae_val = torchmetrics.MeanAbsoluteError()
 
-        self.pears_cor_train = torchmetrics.regression.PearsonCorrCoef()
-        self.pears_val_train = torchmetrics.regression.PearsonCorrCoef()
+        self.pears_cor_train = torchmetrics.PearsonCorrCoef()
+        self.pears_cor_val = torchmetrics.PearsonCorrCoef()
 
-        self.mse_train = torchmetrics.regression.MeanSquaredError()
-        self.mse_val = torchmetrics.regression.MeanSquaredError()
+        self.mse_train = torchmetrics.MeanSquaredError()
+        self.mse_val = torchmetrics.MeanSquaredError()
         
         self.mape_train = torchmetrics.MeanAbsolutePercentageError()
         self.mape_val = torchmetrics.MeanAbsolutePercentageError()
@@ -192,12 +189,12 @@ class MM_BarlowTwins(BaseMultimodalModel):
         self.log(f"{modality}.val.r2", self.r2_val, on_epoch=True, on_step=False)
 
 
-    def training_epoch_end(self, train_step_outputs: List[Any]) -> None:
-        """
-        Train and log regressor
-        """
-        if self.current_epoch != 0 and self.current_epoch % self.args.regressor_freq == 0:
-            embeddings, labels = self.stack_outputs(train_step_outputs)
+    def on_train_epoch_end(self) -> None:
+        if self.current_epoch != 0 and self.current_epoch % getattr(self.args, 'regressor_freq', 1) == 0:
+            if not self.train_embeddings:
+                return
+            embeddings = torch.cat(self.train_embeddings, dim=0).cpu()
+            labels = torch.cat(self.train_labels, dim=0).cpu()
             
             self.estimator = LinearRegression().fit(embeddings, labels)
             preds = self.predict_live_estimator(embeddings)
@@ -211,18 +208,21 @@ class MM_BarlowTwins(BaseMultimodalModel):
             self.log('regressor.train.mse', self.mse_train, on_epoch=True, on_step=False)
             self.log('regressor.train.mape', self.mape_train, on_epoch=True, on_step=False)
             self.log('regressor.train.r2', self.r2_train, on_epoch=True, on_step=False)
+            
+        self.train_embeddings.clear()
+        self.train_labels.clear()
 
 
-    def validation_epoch_end(self, validation_step_outputs: List[torch.Tensor]) -> None:
-        """
-        Log an image from each validation step and calc validation classifier performance
-        """
-        if self.args.log_images:
-            self.logger.log_image(key="Image Example", images=[validation_step_outputs[0]['sample_augmentation']])
+    def on_validation_epoch_end(self) -> None:
+        if self.args.log_images and hasattr(self, 'logger') and self.logger is not None:
+            pass
 
         # Validate regressor
-        if not self.estimator is None and self.current_epoch % self.args.regressor_freq == 0:
-            embeddings, labels = self.stack_outputs(validation_step_outputs)
+        if self.estimator is not None and getattr(self, 'current_epoch', 1) % getattr(self.args, 'regressor_freq', 1) == 0:
+            if not self.val_embeddings:
+                return
+            embeddings = torch.cat(self.val_embeddings, dim=0).cpu()
+            labels = torch.cat(self.val_labels, dim=0).cpu()
 
             preds = self.predict_live_estimator(embeddings)
         
@@ -235,6 +235,9 @@ class MM_BarlowTwins(BaseMultimodalModel):
             self.log('regressor.val.mse', self.mse_val, on_epoch=True, on_step=False)
             self.log('regressor.val.mape', self.mape_val, on_epoch=True, on_step=False)
             self.log('regressor.val.r2', self.r2_val, on_epoch=True, on_step=False)
+            
+        self.val_embeddings.clear()
+        self.val_labels.clear()
 
     
     def stack_outputs(self, outputs: List[torch.Tensor]) -> torch.Tensor:
@@ -257,15 +260,13 @@ class MM_BarlowTwins(BaseMultimodalModel):
         """
         Predict using live estimator
         """
-        preds = self.estimator.predict(embeddings)
-
-        preds = torch.tensor(preds)
-
+        preds_numpy = self.estimator.predict(embeddings)
+        preds = torch.tensor(preds_numpy)
         return preds
     
     
     
-    def configure_optimizers(self) -> Tuple[Dict, Dict]:
+    def configure_optimizers(self) -> Any:
         """
         Define and return optimizer and scheduler for contrastive model. 
         """

@@ -7,13 +7,13 @@ from .linear_regressor import LinearRegressor
 from utils import create_logdir
 from torch.optim import SGD, Adam
 from lightly.utils.scheduler import CosineWarmupScheduler
-from pytorch_lightning.loggers import WandbLogger
+from lightning.pytorch.loggers import WandbLogger
 from lightly.utils.benchmarking import MetricCallback
-from pytorch_lightning.callbacks import (
+from lightning.pytorch.callbacks import (
     ModelCheckpoint,
     LearningRateMonitor,
 )
-from pytorch_lightning import Trainer
+from lightning.pytorch import Trainer
 from models import build_ssl_model
 
 
@@ -85,8 +85,7 @@ def finetune_eval(
             model_checkpoint,
             ]
 
-    trainer = Trainer.from_argparse_args(
-        args,
+    trainer = Trainer(
         gpus=[1],
         precision=32,
         deterministic=True,

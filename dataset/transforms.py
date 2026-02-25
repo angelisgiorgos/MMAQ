@@ -19,7 +19,6 @@ from torchvision.transforms import functional as TF
 
 
 
-
 # define image transforms
 class ChangeBandOrder(object):
     def __call__(self, sample):
@@ -128,47 +127,6 @@ class ToTensor(object):
                 out[k] = v
 
         return out
-
-
-class DatasetStatistics(object):
-    def __init__(self):
-        self.channel_means = np.array([340.76769064, 429.9430203, 614.21682446,
-                590.23569706, 950.68368468, 1792.46290469, 2075.46795189, 2218.94553375,
-                2266.46036911, 2246.0605464, 1594.42694882, 1009.32729131])
-
-        self.channel_std = np.array([554.81258967, 572.41639287, 582.87945694,
-                675.88746967, 729.89827633, 1096.01480586, 1273.45393088, 1365.45589904,
-                1356.13789355, 1302.3292881, 1079.19066363, 818.86747235])
-
-        # statistics over the whole of Europe from Sentinel-5P products in 2018-2020:
-        # l3_mean_europe_2018_2020_005dg.netcdf mean 1.51449095e+15 std 6.93302798e+14
-        # l3_mean_europe_large_2018_2020_005dg.netcdf mean 1.23185273e+15 std 7.51052046e+14
-        self.s5p_mean = 1.23185273e+15      #this will need to be updated if I change the samples file!!!
-        self.s5p_std = 7.51052046e+14       #this will need to be updated if I change the samples file!!!
-
-        #altitude values
-        self.alt_mean = 246.9503722
-        self.alt_std = 255.961989
-
-        #popdense values
-        self.popdense_mean = 435.719603
-        self.popdense_std = 1049.972678
-
-        # values for averages from 2018-2020 per EEA station, across stations
-        self.no2_mean = 17.38866556 #updated to 3poll dataset
-        self.no2_std =  8.99506794 #updated to 3poll dataset
-
-        self.o3_mean = 54.7168629 #updated to 3poll dataset
-        self.o3_std = 11.17569622 #updated to 3poll dataset
-
-        self.co_mean = 0.337909296
-        self.co_std = 0.199646936
-
-        self.so2_mean = 4.632686498
-        self.so2_std = 3.4378752763
-
-        self.pm10_mean = 21.30139834 #updated to 3poll dataset
-        self.pm10_std = 8.454853402 #updated to 3poll dataset
 
 
 
@@ -846,8 +804,6 @@ class RandomResizeCrop(object):
             else:
                 out[k] = v
         return out
-
-
         
 
 
@@ -879,7 +835,6 @@ class RandomContrast(object):
             else:
                 out[k] = v
         return out
-
 
 
 class UpScaleTransform(object):

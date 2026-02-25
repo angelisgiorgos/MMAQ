@@ -5,17 +5,17 @@ import warnings
 # Ignore all warnings to keep the output clean
 warnings.filterwarnings("ignore")
 
-import pytorch_lightning as pl
 import torch
 import torch.multiprocessing
-from pytorch_lightning import Trainer
-from pytorch_lightning.callbacks import (
-    DeviceStatsMonitor,
+from lightning.pytorch import Trainer
+from lightning.pytorch.callbacks import (
+    DeviceStatsMonitor, 
     EarlyStopping,
     LearningRateMonitor,
     ModelCheckpoint,
 )
-from pytorch_lightning.loggers import WandbLogger
+import lightning.pytorch as pl
+from lightning.pytorch.loggers import WandbLogger
 from torch.utils.data import DataLoader
 
 from lightly.utils.dist import rank
@@ -87,12 +87,11 @@ def pretrain(args, wandb_logger):
         LearningRateMonitor(logging_interval="epoch")
     ]
 
-    trainer = Trainer.from_argparse_args(
-        args,
-        devices=[0, 1],
+    trainer = Trainer(
+        devices=args.gpu_ids,
         accelerator="gpu",
         sync_batchnorm=True,
-        precision="32",
+        precision=32,
         deterministic=True,
         callbacks=callbacks,
         logger=wandb_logger,

@@ -116,7 +116,7 @@ class MultimodalContrastiveSimCLR(BaseMultimodalModel):
         self.train_embeddings.clear()
         self.train_labels.clear()
 
-    def training_epoch_end(self, outputs):
+    def on_train_epoch_end(self):
         if self.current_epoch != 0 and self.current_epoch % getattr(self.args, 'regressor_freq', 1) == 0:
             if not self.train_embeddings:
                 return
@@ -177,7 +177,7 @@ class MultimodalContrastiveSimCLR(BaseMultimodalModel):
         self.val_embeddings.clear()
         self.val_labels.clear()
 
-    def validation_epoch_end(self, outputs):
+    def on_validation_epoch_end(self):
         # Validate regressor
         if self.estimator is not None and self.current_epoch % getattr(self.args, 'regressor_freq', 1) == 0:
             if not self.val_embeddings:

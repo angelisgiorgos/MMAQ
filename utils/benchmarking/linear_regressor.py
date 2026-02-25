@@ -2,20 +2,20 @@ from typing import Any, Dict, List, Tuple, Union
 import os
 import sys
 import torch
-from pytorch_lightning import LightningModule
+from lightning.pytorch import LightningModule
 from torch import Tensor
 from torch.nn import MSELoss, Linear, Module
 from torch.optim import SGD, Optimizer
 from utils import create_logdir
 import torchmetrics
 from lightly.utils.scheduler import CosineWarmupScheduler
-from pytorch_lightning.loggers import WandbLogger
+from lightning.pytorch.loggers import WandbLogger
 from lightly.utils.benchmarking import MetricCallback
-from pytorch_lightning.callbacks import (
+from lightning.pytorch.callbacks import (
     ModelCheckpoint,
     LearningRateMonitor,
 )
-from pytorch_lightning import Trainer
+from lightning.pytorch import Trainer
 from models import build_ssl_model
 from utils.utils import undo_normalization
 from losses.supervised_rlp import RandomLinearProjection
@@ -56,7 +56,7 @@ class LinearRegressor(LightningModule):
 
         Examples:
 
-            >>> from pytorch_lightning import Trainer
+            >>> from lightning.pytorch import Trainer
             >>> from torch import nn
             >>> import torchvision
             >>> from lightly.models import LinearClassifier
@@ -190,7 +190,7 @@ class LinearRegressor(LightningModule):
         return loss
     
 
-    def validation_epoch_end(self, outputs):
+    def on_validation_epoch_end(self):
         val_loss = torch.stack(outputs).mean()
         preds = torch.cat(self.val_preds, dim=0)
         targets = torch.cat(self.val_targets, dim=0)
@@ -310,8 +310,7 @@ def linear_eval(args,
             model_checkpoint,
             ]
 
-    trainer = Trainer.from_argparse_args(
-        args,
+    trainer = Trainer(
         accelerator="gpu",
         devices=1,
         precision=32,

@@ -1,6 +1,6 @@
 from typing import Dict, Tuple
-import torch, pytorch_lightning
-from pytorch_lightning import LightningModule
+import torch, lightning.pytorch
+from lightning.pytorch import LightningModule
 from torch import Tensor
 from torch.nn import MSELoss, Linear
 import torchmetrics
