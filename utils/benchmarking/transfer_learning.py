@@ -12,7 +12,6 @@ from torch.optim import SGD, Optimizer, Adam
 from lightly.utils.benchmarking.topk import mean_topk_accuracy
 from lightly.utils.scheduler import CosineWarmupScheduler
 from lightning.pytorch.loggers import WandbLogger
-from lightly.utils.benchmarking import MetricCallback
 from lightning.pytorch import Trainer
 from models import build_ssl_model
 from utils import create_logdir
@@ -32,11 +31,11 @@ class TransferClassifier(LightningModule):
         batch_size_per_device: int,
         topk: Tuple[int, ...] = (1, 1),
         feature_dim: int = 2048,
-        freeze: bool = False) -> None:
+        freeze_model: bool = False) -> None:
         super().__init__()
 
         self.args = args
-        self.freeze = freeze
+        self.freeze_model = freeze_model
         self.classification_head = classification_head
         self.save_hyperparameters(ignore="model")
 
@@ -52,10 +51,10 @@ class TransferClassifier(LightningModule):
 
         self.topk = topk
 
-        self.f1 = F1Score(num_classes=4)
+        self.f1 = F1Score(task="multiclass", num_classes=4)
 
     def forward(self, images: Tensor) -> Tensor:
-        if self.freeze:
+        if self.freeze_model:
             with torch.no_grad():
                 features = self.model.forward(images).flatten(start_dim=1)
         else:
@@ -90,21 +89,13 @@ class TransferClassifier(LightningModule):
         return loss
 
 
-    def validation_step(self, batch, batch_idx) -> Tensor:
+    def validation_step(self, batch, batch_idx):
         loss, topk, f1 = self.shared_step(batch=batch)
         batch_size = len(batch["img"])
         log_dict = {f"val_top{k}": acc for k, acc in topk.items()}
         log_dict.update({"val_f1_score": f1})
         self.log("val_loss", loss, prog_bar=True, sync_dist=True, batch_size=batch_size)
         self.log_dict(log_dict, sync_dist=True, batch_size=batch_size)
-        return {"loss": loss, "topk": topk, "f1": f1}
-
-
-    def on_validation_epoch_end(self):
-        avg_loss = torch.stack([x['loss'] for x in outputs]).mean()
-        avg_f1 = torch.stack([x['f1'] for x in outputs]).mean()
-        self.log('avg_val_loss', avg_loss, prog_bar=True, sync_dist=True)
-        self.log('avg_val_f1', avg_f1, prog_bar=True, sync_dist=True)
 
     
     def test_step(self, batch, batch_idx):
@@ -114,24 +105,13 @@ class TransferClassifier(LightningModule):
         log_dict.update({"test_f1_score": f1})
         self.log("test_loss", loss)
         self.log_dict(log_dict, sync_dist=True, batch_size=batch_size)
-        return {"loss": loss, "topk": topk, "f1": f1}
-
-
-    def test_epoch_end(self, outputs):
-        avg_loss = torch.stack([x['loss'] for x in outputs]).mean()
-        avg_f1 = torch.stack([x['f1'] for x in outputs]).mean()
-        list_print = [print(x) for x in outputs]
-        avg_topk = torch.stack([x['topk'][1] for x in outputs]).mean()
-        self.log('avg_test_loss', avg_loss, prog_bar=True, sync_dist=True)
-        self.log('avg_test_f1', avg_f1, prog_bar=True, sync_dist=True)
-        self.log('avg_test_topk', avg_topk, prog_bar=True, sync_dist=True)
 
     
     def configure_optimizers(
         self,
     ) -> Tuple[List[Optimizer], List[Dict[str, Union[Any, str]]]]:
         parameters = list(self.classification_head.parameters())
-        if not self.freeze:
+        if not self.freeze_model:
             parameters += self.model.parameters()
         optimizer = Adam(
             parameters,
@@ -174,7 +154,6 @@ def tf_classification(args,
     logdir = create_logdir(args.datatype, wandb_logger)
 
     # Train linear classifier.
-    metric_callback = MetricCallback()
 
     model = build_ssl_model(args, data_stats)
     if args.ckpt_path is None:
@@ -198,7 +177,6 @@ def tf_classification(args,
         )
     callbacks=[
             LearningRateMonitor(),
-            metric_callback,
             model_checkpoint,
             ]
 
@@ -217,14 +195,9 @@ def tf_classification(args,
     )
 
     feature_dim = 2048
-    if args.model == "decur":
-        feature_dim = feature_dim*2
-    elif args.model == "mmaq":
-        feature_dim = feature_dim*2
-    elif args.model == "dino":
+    if args.model == "dino":
         feature_dim = 768
 
-    
     
     classification_head = Linear(feature_dim, num_classes)
     
@@ -234,7 +207,7 @@ def tf_classification(args,
         model=model,
         classification_head=classification_head,
         batch_size_per_device=args.batch_size,
-        freeze=True
+        freeze_model=True
     )
 
     trainer.fit(

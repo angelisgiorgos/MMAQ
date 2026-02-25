@@ -26,7 +26,7 @@ def build_ssl_model(args, data_stats):
         model = DeCUR(args, data_stats)
     elif args.model == "simclr":
         model = SimCLR(args, data_stats)
-    elif args.model == "barlowtwins":
+    elif args.model == "barlow_twins":
         model = BarlowTwins(args, data_stats)
     elif args.model == 'byol':
         model = BYOL(args, data_stats)

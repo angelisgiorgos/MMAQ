@@ -1,4 +1,5 @@
 einops
+flash
 lightly
 h5netcdf
 lightning

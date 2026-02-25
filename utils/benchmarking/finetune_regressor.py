@@ -8,7 +8,6 @@ from utils import create_logdir
 from torch.optim import SGD, Adam
 from lightly.utils.scheduler import CosineWarmupScheduler
 from lightning.pytorch.loggers import WandbLogger
-from lightly.utils.benchmarking import MetricCallback
 from lightning.pytorch.callbacks import (
     ModelCheckpoint,
     LearningRateMonitor,
@@ -60,7 +59,6 @@ def finetune_eval(
     logdir = create_logdir(args.datatype, wandb_logger)
 
     # Train linear classifier.
-    metric_callback = MetricCallback()
 
     model = build_ssl_model(args, data_stats)
     model.online_regressor = nn.Identity()
@@ -81,7 +79,6 @@ def finetune_eval(
 
     callbacks=[
             LearningRateMonitor(),
-            metric_callback,
             model_checkpoint,
             ]
 
@@ -99,10 +96,10 @@ def finetune_eval(
     )
 
     feature_dim = 2048
-    if args.model == "decur":
-        feature_dim = feature_dim*2
-    elif args.model == "mmaq":
-        feature_dim = feature_dim*2
+    if args.model in ["decur", "mmaq", "mmcl"]:
+        feature_dim = 4096
+    elif args.model in ["barlow_twins", "byol", "simclr"]:
+        feature_dim = 2048 + getattr(args, "embedding_dim", 13)
     elif args.model == "dino":
         feature_dim = 768
 

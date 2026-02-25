@@ -1,7 +1,6 @@
 from typing import Any, Dict, List, Tuple, Union
 from lightly.utils.scheduler import CosineWarmupScheduler
 from lightning.pytorch.loggers import WandbLogger
-from lightly.utils.benchmarking import MetricCallback
 from lightning.pytorch import Trainer
 import os, sys
 from models import build_ssl_model
@@ -198,7 +197,7 @@ class Segmentation(pl.LightningModule):
         self.test_accuracy(preds, labels)
 
 
-    def test_epoch_end(self, outs):
+    def on_test_epoch_end(self):
         self.log("test_iou", self.test_iou.compute())
         self.log("test_accuracy", self.test_accuracy.compute())
 
@@ -249,7 +248,6 @@ def tf_segmentation(args,
     logdir = create_logdir(args.datatype, wandb_logger)
 
     # Train linear classifier.
-    metric_callback = MetricCallback()
 
     model = build_ssl_model(args, data_stats)
     if args.ckpt_path is None:
@@ -282,7 +280,6 @@ def tf_segmentation(args,
         )
     callbacks=[
             LearningRateMonitor(),
-            metric_callback,
             model_checkpoint,
             ]
 

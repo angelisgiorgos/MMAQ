@@ -41,11 +41,13 @@ class DeCUR(BaseMultimodalModel):
         self.val_mse = torchmetrics.MeanSquaredError(dist_sync_on_step=True)
 
 
-    def forward(self, x: Tensor) -> Tensor:
-        features1 = self.encoder1(x)
-        embedding = features1
-        # features2 = self.encoder2(x)
-        # embedding = torch.cat([features1, features2], axis=1)
+    def forward(self, images: Tensor, tabular: Tensor = None) -> Tensor:
+        features1 = self.encoder1(images)
+        if tabular is not None:
+             features2 = self.encoder2(tabular)
+             embedding = torch.cat([features1, features2], axis=1)
+        else:
+             embedding = features1
         return embedding
 
 

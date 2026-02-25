@@ -18,7 +18,7 @@ class BaseOptions:
         # basic parameters
         parser.add_argument('--seed', default=0, type=int, help='seed for training')
         parser.add_argument('--dataroot', default='./data', help='path to images ')
-        parser.add_argument('--samples_file', default="./data/editted/pollutant_ssl.csv", type=str)
+        parser.add_argument('--samples_file', default="./data/data/editted/pollutant_ssl.csv", type=str)
         parser.add_argument('--datatype', default='multimodal', type=str, help='Trainings model using multmodal simclr')
         parser.add_argument('--name', type=str, default='experiment_name', help='name of the experiment. It decides where to store samples and models')
         parser.add_argument('--gpu_ids', type=str, default='0', help='gpu ids: e.g. 0  0,1,2, 0,2. use -1 for CPU')

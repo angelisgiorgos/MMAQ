@@ -10,7 +10,6 @@ from utils import create_logdir
 import torchmetrics
 from lightly.utils.scheduler import CosineWarmupScheduler
 from lightning.pytorch.loggers import WandbLogger
-from lightly.utils.benchmarking import MetricCallback
 from lightning.pytorch.callbacks import (
     ModelCheckpoint,
     LearningRateMonitor,
@@ -36,10 +35,6 @@ class LinearRegressor(LightningModule):
         freeze_model: bool = False,
     ) -> None:
         """Linear regressor for benchmarking.
-
-        Settings based on SimCLR [0].
-
-        - [0]: https://arxiv.org/abs/2002.05709
 
         Args:
             model:
@@ -129,12 +124,12 @@ class LinearRegressor(LightningModule):
     def forward(self, images: Tensor, tabular: Tensor = None) -> Tensor:
         if self.freeze_model:
             with torch.no_grad():
-                if self.args.model == "mmcl" or self.args.model == "mmaq":
+                if self.args.model in ["mmcl", "mmaq", "decur"]:
                     features = self.model.forward(images, tabular).flatten(start_dim=1)
                 else:
                     features = self.model.forward(images).flatten(start_dim=1)
         else:
-            if self.args.model == "mmcl" or self.args.model == "mmaq":
+            if self.args.model in ["mmcl", "mmaq", "decur"]:
                 features = self.model.forward(images, tabular).flatten(start_dim=1)
             else:
                 features = self.model.forward(images).flatten(start_dim=1)
@@ -191,7 +186,6 @@ class LinearRegressor(LightningModule):
     
 
     def on_validation_epoch_end(self):
-        val_loss = torch.stack(outputs).mean()
         preds = torch.cat(self.val_preds, dim=0)
         targets = torch.cat(self.val_targets, dim=0)
 
@@ -202,7 +196,6 @@ class LinearRegressor(LightningModule):
             "mse": self.mse(preds, targets)
         }
 
-        self.log("val_loss", val_loss, prog_bar=True)
         self.log_dict({f"val_{k}": acc for k, acc in metrics.items()}, prog_bar=True)
 
 
@@ -214,9 +207,8 @@ class LinearRegressor(LightningModule):
         return loss
     
     
-    def test_epoch_end(self, outputs):
+    def on_test_epoch_end(self):
 
-        test_loss = torch.stack(outputs).mean()
         preds = torch.cat(self.test_preds, dim=0)
         targets = torch.cat(self.test_targets, dim=0)
 
@@ -229,7 +221,6 @@ class LinearRegressor(LightningModule):
             "mse": self.mse(preds, targets)
         }
 
-        self.log("test_loss", test_loss, prog_bar=True)
         self.log_dict({f"test_{k}": acc for k, acc in metrics.items()}, prog_bar=True)
 
 
@@ -282,14 +273,13 @@ def linear_eval(args,
     logdir = create_logdir(args.datatype, wandb_logger)
 
     # Train linear classifier.
-    metric_callback = MetricCallback()
 
     model = build_ssl_model(args, data_stats)
     if args.ckpt_path is None:
         ckpt_path = os.path.join("./checkpoints", args.model + ".ckpt")
     else:
         ckpt_path = args.ckpt_path
-    model.load_state_dict(torch.load(ckpt_path)["state_dict"], strict=False)
+    model.load_state_dict(torch.load(ckpt_path, weights_only=False)["state_dict"], strict=True)
 
     if hasattr(torch, "compile"):
         # Compile model if PyTorch supports it.
@@ -306,7 +296,6 @@ def linear_eval(args,
         )
     callbacks=[
             LearningRateMonitor(),
-            metric_callback,
             model_checkpoint,
             ]
 
