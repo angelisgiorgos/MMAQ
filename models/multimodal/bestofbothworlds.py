@@ -1,5 +1,6 @@
 from typing import List, Tuple, Dict
 import torch
+import torchmetrics
 from torch import Tensor
 from models.multimodal.base import BaseMultimodalModel
 from losses.clip_loss import CLIPLoss
@@ -32,6 +33,12 @@ class BestofBothWorlds(BaseMultimodalModel):
 
     def _build_losses(self):
         self.criterion = CLIPLoss(temperature=0.1, lambda_0=0.5)
+
+    def _build_metrics(self):
+        self.val_mae = torchmetrics.MeanAbsoluteError(dist_sync_on_step=True)
+        self.val_mape = torchmetrics.MeanAbsolutePercentageError(dist_sync_on_step=True)
+        self.val_r2 = torchmetrics.R2Score(dist_sync_on_step=True)
+        self.val_mse = torchmetrics.MeanSquaredError(dist_sync_on_step=True)
 
 
     def forward_imaging(self, x: Tensor) -> Tensor:
@@ -72,11 +79,49 @@ class BestofBothWorlds(BaseMultimodalModel):
         """
         im_views, tab_views, targets, original_im = batch
         features= self.forward(im_views[0])
-        regr_loss, regr_log = self.online_regressor.validation_step(
+        regr_loss, preds, targets = self.online_regressor.validation_step(
             (features.detach(), targets), batch_idx
         )
-        self.log_dict(regr_log, prog_bar=True, sync_dist=True, batch_size=len(targets))
-        return regr_loss
+
+        # Update metrics (TorchMetrics handles accumulation internally)
+        self.val_mae.update(preds, targets)
+        self.val_mape.update(preds, targets)
+        self.val_r2.update(preds, targets)
+        self.val_mse.update(preds, targets)
+
+        # Log step loss (proper DDP sync)
+        self.log(
+            "val_step_loss",
+            regr_loss,
+            prog_bar=False,
+            sync_dist=True,
+            batch_size=targets.size(0)
+        )
+
+    def on_validation_epoch_start(self):
+        pass
+
+    def on_validation_epoch_end(self):
+        # Compute metrics (aggregated across devices)
+        metrics = {
+            "val_mae": self.val_mae.compute(),
+            "val_mape": self.val_mape.compute(),
+            "val_r2": self.val_r2.compute(),
+            "val_mse": self.val_mse.compute(),
+        }
+
+        # Log once (Lightning handles sync)
+        self.log_dict(
+            metrics,
+            prog_bar=True,
+            sync_dist=True
+        )
+
+        # Reset metrics for next epoch
+        self.val_mae.reset()
+        self.val_mape.reset()
+        self.val_r2.reset()
+        self.val_mse.reset()
 
 
     def initialize_scheduler(self, optimizer: torch.optim.Optimizer):

@@ -27,7 +27,7 @@ class OnlineLinearRegressor(LightningModule):
         return self.regression_head(x.detach().flatten(start_dim=1))
 
 
-    def shared_step(self, batch, batch_idx, train=False) -> Tuple[Tensor, Dict[int, Tensor]]:
+    def shared_step(self, batch, batch_idx, train=False) -> Tuple[Tensor, Tensor, Tensor]:
         features, targets = batch[0], batch[1]
         predictions = self.forward(features)
         targets = targets.float().unsqueeze(1)
@@ -44,6 +44,6 @@ class OnlineLinearRegressor(LightningModule):
         log_dict.update({f"train_online_{k}": acc for k, acc in metrics.items()})
         return loss, log_dict
 
-    def validation_step(self, batch, batch_idx) -> Tuple[Tensor, Dict[str, Tensor]]:
+    def validation_step(self, batch, batch_idx) -> Tuple[Tensor, Tensor, Tensor]:
         loss, predictions, targets = self.shared_step(batch=batch, batch_idx=batch_idx)
         return loss, predictions, targets

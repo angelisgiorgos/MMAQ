@@ -2,30 +2,27 @@ from typing import Tuple
 import torch
 import torchmetrics
 from torch import Tensor
-from sklearn.linear_model import LinearRegression
 from sklearn.neighbors import KNeighborsRegressor
 from lightly.models.modules import SimCLRProjectionHead
-from flash.core.optimizers import LinearWarmupCosineAnnealingLR
+
 from models.backbones.model import TabularNet, ImagingNet
 from losses import DCL
 
 
 from models.multimodal.base import BaseMultimodalModel
+from utils.benchmarking.online_regressor import OnlineLinearRegressor
 
 class MultimodalContrastiveSimCLR(BaseMultimodalModel):
     """
-    Lightning module for multimodal SSL.
-    Cleaned & structured implementation.
+    Lightning module for multimodal SimCLR.
     """
-    def __init__(self, args):
-        super().__init__(args)
-
-        # ---------- Evaluation Collect ----------
-        self.train_embeddings = []
-        self.train_labels = []
-
-        self.val_embeddings = []
-        self.val_labels = []
+    def __init__(self, args, data_stats):
+        super().__init__(args, data_stats)
+        
+        self.online_regressor = OnlineLinearRegressor(
+            self.data_stats,
+            feature_dim=self.pooled_dim + self.args.embedding_dim
+        )
 
     # ============================================================
     # Model Builders
@@ -53,24 +50,10 @@ class MultimodalContrastiveSimCLR(BaseMultimodalModel):
         self.criterion_val = DCL()
 
     def _build_metrics(self):
-        self.mae_train = torchmetrics.MeanAbsoluteError()
-        self.mae_val = torchmetrics.MeanAbsoluteError()
-
-        self.pears_cor_train = torchmetrics.PearsonCorrCoef()
-        self.pears_cor_val = torchmetrics.PearsonCorrCoef()
-
-        self.mse_train = torchmetrics.MeanSquaredError()
-        self.mse_val = torchmetrics.MeanSquaredError()
-        
-        self.mape_train = torchmetrics.MeanAbsolutePercentageError()
-        self.mape_val = torchmetrics.MeanAbsolutePercentageError()
-        
-        self.r2_train = torchmetrics.R2Score()
-        self.r2_val = torchmetrics.R2Score()
-
-    def _build_regressors(self):
-        self.estimator = None
-        self.knn_estimator = None
+        self.val_mae = torchmetrics.MeanAbsoluteError(dist_sync_on_step=True)
+        self.val_mape = torchmetrics.MeanAbsolutePercentageError(dist_sync_on_step=True)
+        self.val_r2 = torchmetrics.R2Score(dist_sync_on_step=True)
+        self.val_mse = torchmetrics.MeanSquaredError(dist_sync_on_step=True)
 
     # ============================================================
     # Forward
@@ -103,50 +86,15 @@ class MultimodalContrastiveSimCLR(BaseMultimodalModel):
 
         loss = self.criterion_train(z0, z1)
         
-        self.log("multimodal.train.loss", loss, on_epoch=True, on_step=False)
+        embeddings_cat = torch.cat([embeddings_0.detach(), embeddings_1.detach()], dim=1)
+        regr_loss, regr_log = self.online_regressor.training_step((embeddings_cat, y), batch_idx)
 
-        embeddings_cat = torch.cat([embeddings_0, embeddings_1], dim=1)
+        total_loss = loss + 1e-4 * regr_loss
 
-        self.train_embeddings.append(embeddings_cat.detach())
-        self.train_labels.append(y.detach())
+        self.log("train_loss", total_loss, on_epoch=True, on_step=False, sync_dist=True, batch_size=len(y))
+        self.log_dict(regr_log, sync_dist=True, batch_size=len(y))
 
-        return loss
-
-    def on_train_epoch_start(self):
-        self.train_embeddings.clear()
-        self.train_labels.clear()
-
-    def on_train_epoch_end(self):
-        if self.current_epoch != 0 and self.current_epoch % getattr(self.args, 'regressor_freq', 1) == 0:
-            if not self.train_embeddings:
-                return
-            
-            embeddings = torch.cat(self.train_embeddings, dim=0).cpu()
-            labels = torch.cat(self.train_labels, dim=0).cpu()
-            
-            self.estimator = LinearRegression().fit(embeddings, labels)
-            self.knn_estimator = KNeighborsRegressor().fit(embeddings, labels)
-            
-            preds = torch.tensor(self.estimator.predict(embeddings)).to(self.device)
-            knn_preds = torch.tensor(self.knn_estimator.predict(embeddings)).to(self.device)
-            labels = labels.to(self.device)
-            
-            metrics = {
-                'regressor.train.mae': self.mae_train(preds, labels),
-                'regressor.train.mse': self.mse_train(preds, labels),
-                'regressor.train.mape': self.mape_train(preds, labels),
-                'regressor.train.r2': self.r2_train(preds, labels),
-                
-                'regressor.train.knn_mae': self.mae_train(knn_preds, labels),
-                'regressor.train.knn_mse': self.mse_train(knn_preds, labels),
-                'regressor.train.knn_mape': self.mape_train(knn_preds, labels),
-                'regressor.train.knn_r2': self.r2_train(knn_preds, labels),
-            }
-            
-            self.log_dict(metrics, on_epoch=True, on_step=False)
-            
-            for m in [self.mae_train, self.mse_train, self.mape_train, self.r2_train]:
-                m.reset()
+        return total_loss
 
     # ============================================================
     # Validation
@@ -161,51 +109,36 @@ class MultimodalContrastiveSimCLR(BaseMultimodalModel):
         
         loss = self.criterion_val(z0, z1)
 
-        self.log("multimodal.val.loss", loss, on_epoch=True, on_step=False)
+        embeddings_cat = torch.cat([embeddings_0.detach(), embeddings_1.detach()], dim=1)
+        regr_loss, preds, targets = self.online_regressor.validation_step((embeddings_cat, y), batch_idx)
 
-        embeddings_cat = torch.cat([embeddings_0, embeddings_1], dim=1)
+        self.val_mae.update(preds, targets)
+        self.val_mape.update(preds, targets)
+        self.val_r2.update(preds, targets)
+        self.val_mse.update(preds, targets)
 
-        self.val_embeddings.append(embeddings_cat.detach())
-        self.val_labels.append(y.detach())
+        self.log("val_step_loss", regr_loss, prog_bar=False, sync_dist=True, batch_size=targets.size(0))
 
         if getattr(self.args, 'log_images', False) and batch_idx == 0:
             self.logger.log_image(key="Image Example", images=[im_views[1]])
 
-        return loss
-
     def on_validation_epoch_start(self):
-        self.val_embeddings.clear()
-        self.val_labels.clear()
+        pass
 
     def on_validation_epoch_end(self):
-        # Validate regressor
-        if self.estimator is not None and self.current_epoch % getattr(self.args, 'regressor_freq', 1) == 0:
-            if not self.val_embeddings:
-                return
+        metrics = {
+            "val_mae": self.val_mae.compute(),
+            "val_mape": self.val_mape.compute(),
+            "val_r2": self.val_r2.compute(),
+            "val_mse": self.val_mse.compute(),
+        }
+        
+        self.log_dict(metrics, prog_bar=True, sync_dist=True)
 
-            embeddings = torch.cat(self.val_embeddings, dim=0).cpu()
-            labels = torch.cat(self.val_labels, dim=0).cpu()
-
-            preds = torch.tensor(self.estimator.predict(embeddings)).to(self.device)
-            knn_preds = torch.tensor(self.knn_estimator.predict(embeddings)).to(self.device)
-            labels = labels.to(self.device)
-            
-            metrics = {
-                'regressor.val.mae': self.mae_val(preds, labels),
-                'regressor.val.mse': self.mse_val(preds, labels),
-                'regressor.val.mape': self.mape_val(preds, labels),
-                'regressor.val.r2': self.r2_val(preds, labels),
-                
-                'regressor.val.knn_mae': self.mae_val(knn_preds, labels),
-                'regressor.val.knn_mse': self.mse_val(knn_preds, labels),
-                'regressor.val.knn_mape': self.mape_val(knn_preds, labels),
-                'regressor.val.knn_r2': self.r2_val(knn_preds, labels),
-            }
-
-            self.log_dict(metrics, on_epoch=True, on_step=False)
-
-            for m in [self.mae_val, self.mse_val, self.mape_val, self.r2_val]:
-                m.reset()
+        self.val_mae.reset()
+        self.val_mape.reset()
+        self.val_r2.reset()
+        self.val_mse.reset()
 
     # ============================================================
     # Optimizer
@@ -217,7 +150,8 @@ class MultimodalContrastiveSimCLR(BaseMultimodalModel):
                 {'params': self.encoder_imaging.parameters()},
                 {'params': self.projector_imaging.parameters()},
                 {'params': self.encoder_tabular.parameters()},
-                {'params': self.projector_tabular.parameters()}
+                {'params': self.projector_tabular.parameters()},
+                {'params': self.online_regressor.parameters(), 'weight_decay': 0.0}
             ], 
             lr=self.args.lr, 
             weight_decay=self.args.weight_decay
@@ -230,14 +164,8 @@ class MultimodalContrastiveSimCLR(BaseMultimodalModel):
                 eta_min=0, 
                 last_epoch=-1
             )
-        elif self.args.scheduler == 'anneal':
-            scheduler = LinearWarmupCosineAnnealingLR(
-                optimizer, 
-                warmup_epochs=self.args.warmup_epochs, 
-                max_epochs=self.args.max_epochs
-            )
         else:
-            raise ValueError('Valid schedulers are "cosine" and "anneal"')
+            raise ValueError('Valid schedulers are "cosine"')
 
         return {
             "optimizer": optimizer,

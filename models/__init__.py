@@ -17,11 +17,11 @@ def build_ssl_model(args, data_stats):
     if args.model == "mmcl":
         model = BestofBothWorlds(args, data_stats)
     elif args.model == "mmbyol":
-        model = MM_BYOL(args)
-    elif args.model in ["mm_con", "mmsimclr"]:
-        model = MultimodalContrastiveSimCLR(args)
-    elif args.model in ["mm_barlow_twins", "mm_bar"]:
-        model = MM_BarlowTwins(args)
+        model = MM_BYOL(args, data_stats)
+    elif args.model == "mmsimclr":
+        model = MultimodalContrastiveSimCLR(args, data_stats)
+    elif args.model == "mm_barlow_twins":
+        model = MM_BarlowTwins(args, data_stats)
     elif args.model == "decur":
         model = DeCUR(args, data_stats)
     elif args.model == "simclr":

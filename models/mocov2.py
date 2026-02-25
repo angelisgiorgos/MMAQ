@@ -4,7 +4,6 @@ from typing import List, Tuple
 import torch
 from lightning.pytorch import LightningModule
 from torch import Tensor
-from torch.nn import Identity
 from torch.optim import SGD
 from lightly.loss import NTXentLoss
 from lightly.models.modules import MoCoProjectionHead

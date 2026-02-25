@@ -9,8 +9,12 @@ import copy
 import torch
 import torch.nn as nn
 import torchmetrics
-from sklearn.linear_model import LinearRegression
+import torch
+import torch.nn as nn
+import torchmetrics
 import lightning.pytorch as pl
+from flash.core.optimizers import LinearWarmupCosineAnnealingLR
+from utils.benchmarking.online_regressor import OnlineLinearRegressor
 
 from models.multimodal.base import BaseMultimodalModel
 from lightly.models.modules import BYOLProjectionHead
@@ -54,6 +58,7 @@ class MM_BYOL(BaseMultimodalModel):
     def __init__(
         self,
         args,
+        data_stats,
         hidden_dim: int = 4096,
         out_dim: int = 256,
         m: float = 0.9,
@@ -61,7 +66,14 @@ class MM_BYOL(BaseMultimodalModel):
         self.hidden_dim = hidden_dim
         self.out_dim = out_dim
         self.m = m
-        super().__init__(args)
+        super().__init__(args, data_stats)
+        
+        # In this implementation, the multimodal regression is concatenated Imaging + Tabular
+        self.online_regressor = OnlineLinearRegressor(
+            self.data_stats,
+            feature_dim=self.pooled_dim + self.args.embedding_dim
+        )
+
 
         warnings.warn(
             Warning(
@@ -98,7 +110,10 @@ class MM_BYOL(BaseMultimodalModel):
         self.initialize_training_losses()
 
     def _build_metrics(self):
-        self.initialize_regressor_and_metrics()
+        self.val_mae = torchmetrics.MeanAbsoluteError(dist_sync_on_step=True)
+        self.val_mape = torchmetrics.MeanAbsolutePercentageError(dist_sync_on_step=True)
+        self.val_r2 = torchmetrics.R2Score(dist_sync_on_step=True)
+        self.val_mse = torchmetrics.MeanSquaredError(dist_sync_on_step=True)
     
     
     @torch.no_grad()
@@ -195,7 +210,7 @@ class MM_BYOL(BaseMultimodalModel):
             tf1 = self.encoder_tabular_momentum(tx1)
             tout1 = self.projector_tabular_momentum(tf1)
             
-        return out0, tout0, out1, tout1, [tf0, tf1]
+        return out0, tout0, out1, tout1, [f0, tf0]
 
     
     def initialize_training_losses(self):
@@ -213,150 +228,66 @@ class MM_BYOL(BaseMultimodalModel):
                                          List[torch.Tensor], 
                                          torch.Tensor, 
                                          torch.Tensor, 
-                                         List[torch.Tensor] | None], _) -> Any:
-        im_views, tab_views, y = batch[0], batch[1], batch[2]
+                                         List[torch.Tensor] | None], batch_idx) -> Any:
+        im_views, tab_views, targets = batch[0], batch[1], batch[2]
         z0, tz0, z1, tz1, emb = self._forward(im_views[0], tab_views[0], im_views[1], tab_views[1])
         loss = self.criterion_train(z0, z1, tz0, tz1)
-        self.log(f"multimodal.train.loss", loss, on_epoch=True, on_step=False)
-        emb_cat = torch.cat([emb[0], emb[1]], dim=1)
-        self.train_embeddings.append(emb_cat.detach())
-        self.train_labels.append(y.detach())
-        return {'loss': loss, 'embeddings': emb_cat, 'labels': y}
+        
+        emb_cat = torch.cat([emb[0].detach(), emb[1].detach()], dim=1)
+        
+        regr_loss, regr_log = self.online_regressor.training_step(
+            (emb_cat, targets), batch_idx
+        )
+
+        total_loss = loss + 1e-4 * regr_loss
+
+        self.log("train_loss", total_loss, on_epoch=True, on_step=False, sync_dist=True, batch_size=len(targets))
+        self.log_dict(regr_log, sync_dist=True, batch_size=len(targets))
+        
+        return total_loss
     
     
     def validation_step(self, batch: Tuple[List[torch.Tensor], 
                                            List[torch.Tensor], 
                                            torch.Tensor, 
                                            torch.Tensor, 
-                                           List[torch.Tensor] | None], _) -> Any:
-        """
-        Validate contrastive model
-        """
-        im_views, tab_views, y = batch[0], batch[1], batch[2]
+                                           List[torch.Tensor] | None], batch_idx) -> Any:
+        # Validate contrastive model and regressor
+        im_views, tab_views, targets = batch[0], batch[1], batch[2]
         z0, tz0, z1, tz1, emb = self._forward(im_views[0], tab_views[0], im_views[1], tab_views[1])
         loss = self.criterion_val(z0, z1, tz0, tz1)
-        self.log("multimodal.val.loss", loss, on_epoch=True, on_step=False)
-        emb_cat = torch.cat([emb[0], emb[1]], dim=1)
-        self.val_embeddings.append(emb_cat.detach())
-        self.val_labels.append(y.detach())
-        return {'sample_augmentation': im_views[1], 'embeddings': emb_cat, 'labels': y}
+        
+        emb_cat = torch.cat([emb[0].detach(), emb[1].detach()], dim=1)
+        
+        regr_loss, preds, targets = self.online_regressor.validation_step(
+            (emb_cat, targets), batch_idx
+        )
+
+        self.val_mae.update(preds, targets)
+        self.val_mape.update(preds, targets)
+        self.val_r2.update(preds, targets)
+        self.val_mse.update(preds, targets)
+
+        self.log("val_step_loss", regr_loss, prog_bar=False, sync_dist=True, batch_size=targets.size(0))
+
+    def on_validation_epoch_start(self):
+        pass
+
+    def on_validation_epoch_end(self):
+        metrics = {
+            "val_mae": self.val_mae.compute(),
+            "val_mape": self.val_mape.compute(),
+            "val_r2": self.val_r2.compute(),
+            "val_mse": self.val_mse.compute(),
+        }
+        self.log_dict(metrics, prog_bar=True, sync_dist=True)
+        self.val_mae.reset()
+        self.val_mape.reset()
+        self.val_r2.reset()
+        self.val_mse.reset()
     
     
-    def initialize_regressor_and_metrics(self):
-        """
-        Initializes classifier and metrics. Takes care to set correct number of classes for embedding similarity metric depending on loss.
-        """
-        # Regressor
-        self.estimator = None
-        # RMSE calculated against all others in batch of same view except for self (i.e. -1) and all of the other view
-        self.mae_train = torchmetrics.MeanAbsoluteError()
-        self.mae_val = torchmetrics.MeanAbsoluteError()
 
-        self.pears_cor_train = torchmetrics.PearsonCorrCoef()
-        self.pears_cor_val = torchmetrics.PearsonCorrCoef()
-
-        self.mse_train = torchmetrics.MeanSquaredError()
-        self.mse_val = torchmetrics.MeanSquaredError()
-        
-        self.mape_train = torchmetrics.MeanAbsolutePercentageError()
-        self.mape_val = torchmetrics.MeanAbsolutePercentageError()
-        
-        self.r2_train = torchmetrics.R2Score()
-        self.r2_val = torchmetrics.R2Score()
-
-
-    def calc_and_log_train_embedding_metrics(self, logits, labels, modality: str) -> None:
-        self.mae_train(logits, labels)
-        self.pears_cor_train(logits, labels)
-        self.mse_train(logits, labels)
-        self.mape_train(logits, labels)
-        self.r2_train(logits, labels)
-
-        self.log(f"{modality}.train.mae",self.mae_train, on_epoch=True, on_step=False)
-        self.log(f"{modality}.train.pears_cor", self.pears_cor_train, on_epoch=True, on_step=False)
-        self.log(f"{modality}.train.mse", self.mse_train, on_epoch=True, on_step=False)
-        self.log(f"{modality}.train.mape",self.mape_train, on_epoch=True, on_step=False)
-        self.log(f"{modality}.train.r2",self.r2_train, on_epoch=True, on_step=False)
-
-
-    def calc_and_log_val_embedding_metrics(self, logits, labels, modality: str) -> None:
-        self.mae_val(logits, labels)
-        self.pears_cor_val(logits, labels)
-        self.mse_val(logits, labels)
-        self.mape_val(logits, labels)
-        self.r2_val(logits, labels)
-        
-
-        self.log(f"{modality}.val.mae",self.mae_val, on_epoch=True, on_step=False)
-        self.log(f"{modality}.val.pears_cor", self.pears_cor_val, on_epoch=True, on_step=False)
-        self.log(f"{modality}.val.mse", self.mse_val, on_epoch=True, on_step=False)
-        self.log(f"{modality}.val.mape", self.mape_val, on_epoch=True, on_step=False)
-        self.log(f"{modality}.val.r2", self.r2_val, on_epoch=True, on_step=False)
-
-
-    def on_train_epoch_end(self) -> None:
-        if self.current_epoch != 0 and self.current_epoch % getattr(self.args, 'regressor_freq', 1) == 0:
-            if not self.train_embeddings:
-                return
-            embeddings = torch.cat(self.train_embeddings, dim=0).cpu()
-            labels = torch.cat(self.train_labels, dim=0).cpu()
-            
-            self.estimator = LinearRegression().fit(embeddings, labels)
-            preds = self.predict_live_estimator(embeddings)
-
-            self.mae_train(preds, labels)
-            self.mse_train(preds, labels)
-            self.mape_train(preds, labels)
-            self.r2_train(preds, labels)
-
-            self.log('regressor.train.mae', self.mae_train, on_epoch=True, on_step=False)
-            self.log('regressor.train.mse', self.mse_train, on_epoch=True, on_step=False)
-            self.log('regressor.train.mape', self.mape_train, on_epoch=True, on_step=False)
-            self.log('regressor.train.r2', self.r2_train, on_epoch=True, on_step=False)
-            
-        self.train_embeddings.clear()
-        self.train_labels.clear()
-
-
-    def on_validation_epoch_end(self) -> None:
-        if self.args.log_images and hasattr(self, 'logger') and self.logger is not None:
-            # We don't have validation_step_outputs anymore, so skip image logging here
-            # or handle it differently if needed.
-            pass
-
-        # Validate regressor
-        if self.estimator is not None and getattr(self, 'current_epoch', 1) % getattr(self.args, 'regressor_freq', 1) == 0:
-            if not self.val_embeddings:
-                return
-            embeddings = torch.cat(self.val_embeddings, dim=0).cpu()
-            labels = torch.cat(self.val_labels, dim=0).cpu()
-
-            preds = self.predict_live_estimator(embeddings)
-        
-            self.mae_val(preds, labels)
-            self.mse_val(preds, labels)
-            self.mape_val(preds, labels)
-            self.r2_val(preds, labels)
-
-            self.log('regressor.val.mae', self.mae_val, on_epoch=True, on_step=False)
-            self.log('regressor.val.mse', self.mse_val, on_epoch=True, on_step=False)
-            self.log('regressor.val.mape', self.mape_val, on_epoch=True, on_step=False)
-            self.log('regressor.val.r2', self.r2_val, on_epoch=True, on_step=False)
-            
-        self.val_embeddings.clear()
-        self.val_labels.clear()
-
-    
-
-
-    
-    def predict_live_estimator(self, embeddings: torch.Tensor) -> torch.Tensor:
-        """
-        Predict using live estimator
-        """
-        preds_numpy = self.estimator.predict(embeddings)
-        preds = torch.tensor(preds_numpy)
-        return preds
     
     
     def initialize_scheduler(self, optimizer: Any):
@@ -383,7 +314,8 @@ class MM_BYOL(BaseMultimodalModel):
             {'params': self.encoder_imaging.parameters()}, 
             {'params': self.projector_imaging.parameters()},
             {'params': self.encoder_tabular.parameters()},
-            {'params': self.projector_tabular.parameters()}
+            {'params': self.projector_tabular.parameters()},
+            {'params': self.online_regressor.parameters(), 'weight_decay': 0.0}
         ], 
         lr=self.args.lr,
         momentum=0.9,
