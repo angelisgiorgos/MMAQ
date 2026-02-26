@@ -2,7 +2,6 @@ from typing import Tuple
 import torch
 import torchmetrics
 from torch import Tensor
-from sklearn.neighbors import KNeighborsRegressor
 from lightly.models.modules import SimCLRProjectionHead
 
 from models.backbones.model import TabularNet, ImagingNet

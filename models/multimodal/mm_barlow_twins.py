@@ -1,18 +1,16 @@
 """ BARLOW TWINS Model """
-from typing import List, Tuple, Dict, Any
+from typing import List, Tuple, Any
 
 
 import warnings
-import copy
 import torch
-import torch.nn as nn
 import torchmetrics
-import lightning.pytorch as pl
+
 from utils.benchmarking.online_regressor import OnlineLinearRegressor
 from models.multimodal.base import BaseMultimodalModel
 from lightly.models.modules import BarlowTwinsProjectionHead
 from models.backbones.model import TabularNet, ImagingNet
-
+from flash.core.optimizers import LinearWarmupCosineAnnealingLR
 from losses import select_loss_imaging, select_loss_tabular, Multimodal_Loss
 
 
@@ -145,7 +143,6 @@ class MM_BarlowTwins(BaseMultimodalModel):
         self.val_mape.reset()
         self.val_r2.reset()
         self.val_mse.reset()
-
 
 
     def initialize_scheduler(self, optimizer: Any):

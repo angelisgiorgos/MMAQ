@@ -1,18 +1,11 @@
-""" BYOL Model """
-from typing import List, Tuple, Dict, Any
-
-# Copyright (c) 2021. Lightly AG and its affiliates.
-# All Rights Reserved
+""" Multimodal BYOL Model """
+from typing import List, Tuple, Any
 
 import warnings
 import copy
 import torch
 import torch.nn as nn
 import torchmetrics
-import torch
-import torch.nn as nn
-import torchmetrics
-import lightning.pytorch as pl
 from flash.core.optimizers import LinearWarmupCosineAnnealingLR
 from utils.benchmarking.online_regressor import OnlineLinearRegressor
 
