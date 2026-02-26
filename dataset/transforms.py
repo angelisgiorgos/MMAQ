@@ -383,6 +383,14 @@ class Resize(object):
             else:
                 s5p = sample["s5p"].clone()
 
+        if sample.get("fpt") is not None:
+            if not isinstance(sample.get("fpt"), torch.Tensor):
+                fpt = torch.from_numpy(sample.get("fpt")).clone().unsqueeze(0)
+            else:
+                fpt = sample.get("fpt").clone().unsqueeze(0)
+            resized_fpt = T.functional.resize(fpt, size=(self.size, self.size),
+                                              interpolation=T.InterpolationMode.NEAREST)
+
 
         resized_img = T.functional.resize(img, size=(self.size, self.size),
                                           interpolation=T.InterpolationMode.BICUBIC)
@@ -395,6 +403,8 @@ class Resize(object):
         for k, v in sample.items():
             if k == "img":
                 out[k] = resized_img
+            elif k == "fpt":
+                out[k] = resized_fpt
             elif k == "no2":
                 out[k] = sample.get("no2")
             elif k == "s5p":

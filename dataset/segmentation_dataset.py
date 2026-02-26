@@ -185,7 +185,11 @@ class SmokePlumeSegmentationDataset(Dataset):
                 imgdata = cv2.resize(np.transpose(imgdata, (1, 2, 0)).astype('float32'), (120, 120),
                                      interpolation=cv2.INTER_CUBIC)
                 imgdata = np.transpose(imgdata, (2, 0, 1))
-                fptdata = cv2.resize(fptdata, (120, 120), interpolation=cv2.INTER_CUBIC)
+                fptdata = cv2.resize(
+                                fptdata.astype(np.uint8),
+                                (120, 120),
+                                interpolation=cv2.INTER_NEAREST
+                            )
         
         sample = {
             'idx': idx,

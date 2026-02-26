@@ -159,7 +159,7 @@ def get_transforms(datatype, train, new_imgsize, is_segmentation=False):
     from torchvision.transforms import Normalize as NormalizeRGB
     
     if train:
-        if datatype == "rgb_unimodal":
+        if datatype == "rgb_unimodal" and not is_segmentation:
             transforms_list = [
                 T.ToTensor(),
                 T.Resize(new_imgsize),

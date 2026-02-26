@@ -42,21 +42,27 @@ class SegmentationDecoder(nn.Module):
         self.final_upsample = torch.nn.Upsample(size=(224, 224), mode='bilinear', align_corners=True)
 
     def forward(self, x1):
-        B, F, _ = x1['0'].shape
-        uc0 = self.uc0(x1['0'].view(B, F, 14, 14))
-        up0 = self.up0(uc0)
-        y0 = self.cls0(up0)
-        y1 = self.cls1(self.up1(self.uc1(x1['1'].view(B, F, 14, 14))))
-        y2 = self.cls2(self.up2(self.uc2(x1['2'].view(B, F, 14, 14))))
 
-        # Upsample each output to the final size
+        def reshape_if_vit(x):
+            if self.args.model == "dino":
+                B, C, N = x.shape
+                x = x.view(B, C, 14, 14)
+            return x
+
+        x0 = reshape_if_vit(x1['0'])
+        x1_ = reshape_if_vit(x1['1'])
+        x2 = reshape_if_vit(x1['2'])
+
+        y0 = self.cls0(self.up0(self.uc0(x0)))
+        y1 = self.cls1(self.up1(self.uc1(x1_)))
+        y2 = self.cls2(self.up2(self.uc2(x2)))
+
         y0 = self.final_upsample(y0)
         y1 = self.final_upsample(y1)
         y2 = self.final_upsample(y2)
 
-        # Sum up the results
-        y = y0 + y1 + y2
-        return y
+        return y0 + y1 + y2
+
 
 class DinoFeatureExtractor(nn.Module):
     def __init__(self, vit_model):
