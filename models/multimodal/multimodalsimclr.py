@@ -7,7 +7,6 @@ from lightly.models.modules import SimCLRProjectionHead
 from models.backbones.model import TabularNet, ImagingNet
 from losses import DCL
 
-
 from models.multimodal.base import BaseMultimodalModel
 from utils.benchmarking.online_regressor import OnlineLinearRegressor
 

@@ -7,13 +7,13 @@ import torchmetrics
 from torch import nn, Tensor
 from models.backbones.model import S2Backbone, S5Backbone
 from models.projector.decur_projector import DeCURProjector
-from losses import DeCURLoss
+from losses.decur_loss import DeCURLoss
 from flash.core.optimizers import LARS
 from utils.benchmarking.online_regressor import OnlineLinearRegressor
 from lightly.utils.scheduler import CosineWarmupScheduler
 from lightly.models.utils import get_weight_decay_parameters
-
 from models.multimodal.base import BaseMultimodalModel
+
 
 class DeCUR(BaseMultimodalModel):
     def __init__(self, args, data_stats):

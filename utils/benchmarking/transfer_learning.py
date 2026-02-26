@@ -215,7 +215,7 @@ def tf_classification(args,
     )
     CKPT_PATH = model_checkpoint.best_model_path
     print(CKPT_PATH)
-    checkpoint = torch.load(CKPT_PATH)
+    checkpoint = torch.load(CKPT_PATH, weights_only=False)
     classifier.load_state_dict(checkpoint["state_dict"])
     trainer.test(model=classifier, dataloaders=val_dataloader)
     

@@ -297,9 +297,6 @@ def run_evaluation(
     # Pretrained model for linear regression.
     model = build_ssl_model(args, data_stats)
     
-    if is_finetune:
-        setattr(model, "online_regressor", nn.Identity())
-        
     if args.ckpt_path is None:
         ckpt_path = os.path.join("./checkpoints", args.model + ".ckpt")
     else:
@@ -309,6 +306,9 @@ def run_evaluation(
         torch.load(ckpt_path, weights_only=False)["state_dict"], 
         strict=True
     )
+
+    if is_finetune:
+        setattr(model, "online_regressor", nn.Identity())
 
     if not is_finetune and hasattr(torch, "compile"):
         # Compile model if PyTorch supports it.
@@ -388,7 +388,7 @@ def run_evaluation(
 
     CKPT_PATH = model_checkpoint.best_model_path
     print(CKPT_PATH)
-    checkpoint = torch.load(CKPT_PATH)
+    checkpoint = torch.load(CKPT_PATH, weights_only=False)
     regressor.load_state_dict(checkpoint["state_dict"])
     trainer.test(ckpt_path="best", dataloaders=val_dataloader)
 
