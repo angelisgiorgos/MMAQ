@@ -23,6 +23,8 @@ class DINO(LightningModule):
     def __init__(self, args, data_stats) -> None:
         super().__init__()
         self.args = args
+        self.args.deterministic = False
+        torch.use_deterministic_algorithms(False, warn_only=True)
         self.save_hyperparameters()
 
         # resnet = resnet50()
@@ -44,16 +46,19 @@ class DINO(LightningModule):
         self.val_preds = []
         self.val_targets = []
 
-        self.mae = torchmetrics.MeanAbsoluteError()
-        self.mape = torchmetrics.MeanAbsolutePercentageError()
-        self.r2 = torchmetrics.R2Score()
-        self.mse = torchmetrics.MeanSquaredError()
+        self.val_mae = torchmetrics.MeanAbsoluteError()
+        self.val_mape = torchmetrics.MeanAbsolutePercentageError()
+        self.val_r2 = torchmetrics.R2Score()
+        self.val_mse = torchmetrics.MeanSquaredError()
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        return self.backbone(x)
+        with torch.backends.cudnn.flags(deterministic=False):
+            features = self.backbone(x)
+        return features
 
-    def forward_student(self, x: torch.Tensor) -> torch.Tensor:
-        features = self.student_backbone(x).flatten(start_dim=1)
+    def forward_student(self, x: torch.Tensor) -> torch.Tensor: 
+        with torch.backends.cudnn.flags(deterministic=False):
+            features = self.student_backbone(x).flatten(start_dim=1)
         projections = self.student_projection_head(features)
         return projections
 
@@ -117,24 +122,43 @@ class DINO(LightningModule):
         regr_loss, preds, targets = self.online_regressor.validation_step(
             (features.detach(), targets), batch_idx
         )
-        self.val_preds.append(preds.detach())
-        self.val_targets.append(targets)
+        # Update metrics (TorchMetrics handles accumulation internally)
+        self.val_mae.update(preds, targets)
+        self.val_mape.update(preds, targets)
+        self.val_r2.update(preds, targets)
+        self.val_mse.update(preds, targets)
+
+        # Log step loss (proper DDP sync)
+        self.log(
+            "val_step_loss",
+            regr_loss,
+            prog_bar=False,
+            sync_dist=True,
+            batch_size=targets.size(0)
+        )
         return regr_loss
     
     def on_validation_epoch_end(self):
-        val_loss = torch.stack(outputs).mean()
-        preds = torch.cat([pred.to(self.mae.device) for pred in self.val_preds], dim=0)
-        targets = torch.cat([target.to(self.mae.device) for target in self.val_targets], dim=0)
-
+        # Compute metrics (aggregated across devices)
         metrics = {
-            "mae": self.mae(preds, targets),
-            "mape": self.mape(preds, targets),
-            "r2": self.r2(preds, targets),
-            "mse": self.mse(preds, targets)
+            "val_mae": self.val_mae.compute(),
+            "val_mape": self.val_mape.compute(),
+            "val_r2": self.val_r2.compute(),
+            "val_mse": self.val_mse.compute(),
         }
 
-        self.log("val_epoch_loss", val_loss, prog_bar=True)
-        self.log_dict({f"val_{k}": acc for k, acc in metrics.items()}, prog_bar=True)
+        # Log once (Lightning handles sync)
+        self.log_dict(
+            metrics,
+            prog_bar=True,
+            sync_dist=True
+        )
+
+        # Reset metrics for next epoch
+        self.val_mae.reset()
+        self.val_mape.reset()
+        self.val_r2.reset()
+        self.val_mse.reset()
 
     def configure_optimizers(self):
         # Don't use weight decay for batch norm, bias parameters, and classification
@@ -180,9 +204,7 @@ class DINO(LightningModule):
     #     self.student_projection_head.cancel_last_layer_gradients(current_epoch=self.current_epoch)
 
 
-    def configure_gradient_clipping(self, optimizer, optimizer_idx, gradient_clip_val=3.0, gradient_clip_algorithm="norm"):
-        # if optimizer_idx == 0:
-            # Lightning will handle the gradient clipping
+    def configure_gradient_clipping(self, optimizer, gradient_clip_val=3.0, gradient_clip_algorithm="norm"):
         self.clip_gradients(
             optimizer, gradient_clip_val=gradient_clip_val, gradient_clip_algorithm=gradient_clip_algorithm
         )

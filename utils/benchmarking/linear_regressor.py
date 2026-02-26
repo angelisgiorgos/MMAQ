@@ -302,7 +302,7 @@ def run_evaluation(
         ckpt_path = args.ckpt_path
         
     model.load_state_dict(
-        torch.load(ckpt_path, weights_only=False)["state_dict"], 
+        torch.load(ckpt_path, weights_only=False)["state_dict"],
         strict=True
     )
 

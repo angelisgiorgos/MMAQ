@@ -25,8 +25,12 @@ class SegmentationDecoder(nn.Module):
         self.args = args
         if self.args.model == "dino":
             in_channels_list = [768, 768, 768]
+        elif self.args.datatype == "rgb_unimodal":
+            # For resnet50 standard 3-channel (returns layers 2, 3, 4 typically with 512, 1024, 2048)
+            in_channels_list = [512, 1024, 2048]
         else:
             in_channels_list = [512, 1024, 2048]
+
         self.uc0 = torch.nn.Conv2d(in_channels=in_channels_list[0], out_channels=128, kernel_size=1)
         self.uc1 = torch.nn.Conv2d(in_channels=in_channels_list[1], out_channels=256, kernel_size=1)
         self.uc2 = torch.nn.Conv2d(in_channels=in_channels_list[2], out_channels=512, kernel_size=1)
@@ -266,7 +270,16 @@ def tf_segmentation(args,
     elif args.model == "dino":
         backbone = model.backbone
     else:
-        backbone = model.backbone.backbone_S2
+        # For multimodalsimclr, byol, simclr which use ImagingNet
+        if hasattr(model, 'encoder_imaging'):
+            backbone = model.encoder_imaging.backbone_S2.backbone_S2
+        elif hasattr(model, 'backbone'):
+            if hasattr(model.backbone, 'backbone_S2'):
+                backbone = model.backbone.backbone_S2
+            else:
+                backbone = model.backbone
+        else:
+            backbone = model.encoder1.backbone_S2
 
     model_checkpoint = ModelCheckpoint(
             filename="checkpoint_last_epoch_{epoch:02d}",

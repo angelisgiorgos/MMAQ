@@ -98,7 +98,7 @@ def pretrain(args, wandb_logger):
         accelerator="gpu",
         sync_batchnorm=True,
         precision=32,
-        deterministic=True,
+        deterministic=getattr(args, "deterministic", True),
         callbacks=callbacks,
         logger=wandb_logger,
         max_epochs=args.max_epochs,
@@ -210,13 +210,15 @@ def run_transfer_segmentation(args):
 if __name__ == "__main__":
     # Performance and reproducibility settings
     torch.multiprocessing.set_sharing_strategy("file_system")
-    torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = False
     torch.set_float32_matmul_precision("high")
     
     opts = RunOptions()
     args = opts.parse()
     
+    if getattr(args, "deterministic", True):
+        torch.use_deterministic_algorithms(True, warn_only=True)
+
     pl.seed_everything(args.seed)
 
     base_dir = os.path.dirname(os.path.abspath(sys.argv[0]))

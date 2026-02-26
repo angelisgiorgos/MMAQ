@@ -2,6 +2,24 @@
 
 This repository contains the official implementation of **MMAQ**, as presented at ICIP 2024. MMAQ is a multi-modal self-supervised learning (SSL) framework that integrates Sentinel-2, Sentinel-5P, and tabular land-use data to estimate ground-level air quality.
 
+## 📊 Dataset & Architecture Structure
+
+The pretraining dataset is structured as follows:
+
+```
+data/
+├── data/
+│   ├── editted/
+│   │   └── pollutant_ssl.csv
+├── sentinel-2
+├── sentinel-5p/
+```
+Data Modalities:
+- Sentinel-2: 12 multi-spectral bands resized to $224^2$.
+- Sentinel-5P: Tropospheric column density reprojected to EPSG:32614.
+- Tabular: Land use data including Altitude, Population Density, Area Type, and Station Type.
+
+
 ## 📊 Benchmarks & Results
 
 MMAQ achieves state-of-the-art performance by capturing both inter-modal and intra-modal correspondences.
@@ -71,6 +89,90 @@ python run.py \
     --datatype multimodal \
     --samples_file ./data/data/editted/pollutant_ssl.csv \
     --max_epochs 500 \
-    --learning_rate 0.2 \
+    --lr 0.2 \
     --wandb_project "MMAQ_Pretraining"
+    --model mmaq
+    --channels 12
+    --uncertainty
+```
+The current codebase supports self-supervised pretraining for both multimodal and unimodal models, and is capable of handling both multispectral and rgb-based data.
+Models Supported:
+* MMAQ (Multimodal, Sentinel-2(Multispectral), Sentinel-5P, Tabular )
+* DeCUR (Multimodal, Sentinel-2(RGB) and Sentinel-5P)
+* MMCL (Multimodal, Sentinel-2(RGB), Tabular)
+* MM-Barlow Twins (Multimodal, Sentinel-2(Multispectral), Sentinel-5P, Tabular)
+* MM-BYOL (Multimodal, Sentinel-2(Multispectral), Sentinel-5P, Tabular)
+* SimCLR (Unimodal, S-2(RGB))
+* SimSiam (Unimodal, S-2(RGB))
+* DINO (Unimodal, S-2(RGB))
+* Barlow Twins  (Unimodal, S-2(RGB))
+* BYOL (Unimodal, S-2(RGB))
+* ViCReg (Unimodal, S-2(RGB))
+* MoCoV2 (Unimodal, S-2(RGB))
+
+For pretraining DINO model, use the following command:
+```bash
+python run.py \
+    --task pretrain \
+    --datatype rgb_unimodal \
+    --samples_file ./data/data/editted/pollutant_ssl.csv \
+    --max_epochs 500 \
+    --lr 0.2 \
+    --wandb_project "MMAQ_Pretraining"
+    --model dino
+    --channels 3
+```
+
+### 2. Linear Probing
+Evaluates the quality of learned representations by freezing the backbone and training a linear regressor for 90 epochs.
+
+```bash
+python run.py \
+    --task linear_eval \
+    --datatype multimodal \
+    --samples_file ./data/data/editted/pollutant_ssl.csv \
+    --max_epochs 90 \
+    --lr 0.2 \
+    --wandb_project "MMAQ_Linear_Evaluation"
+    --model mmaq
+    --channels 12
+    --ckpt_path ./checkpoints/mmaq_best.ckpt
+```
+
+### 3. Linear Evaluation (Fine-Tuning)
+This task evaluates the performance of the pre-trained encoders on a linear regression, by fine-tuning the encoders on the  NO2 Concentration Estimation task.
+```bash
+python run.py \
+    --task fine_tune \
+    --datatype multimodal \
+    --samples_file ./data/data/editted/pollutant_ssl.csv \
+    --max_epochs 90 \
+    --lr 0.2 \
+    --wandb_project "MMAQ_Linear_Evaluation"
+    --model mmaq
+    --channels 12
+    --ckpt_path ./checkpoints/mmaq_best.ckpt
+```
+
+### 4. Transfer Learning: Classification & Segmentation 
+Evaluates the backbone's versatility on auxiliary environmental tasks like fuel classification and industrial plume segmentation
+
+```bash
+# Classification
+python run.py --task transfer_learning --tf_datapath /path/to/data --ckpt_path checkpoints/mmaq_best.ckpt
+
+# Segmentation
+python run.py --task transfer_segmentation --tf_datapath /path/to/data --ckpt_path checkpoints/mmaq_best.ckpt
+```
+
+### Citation
+```
+@inproceedings{angelis2024mmaq,
+  title={MMAQ: A Multi-Modal Self-Supervised Approach For Estimating Air Quality From Remote Sensing Data},
+  author={Angelis, G. F. and Emvoliadis, A. and Drosou, A. and Tzovaras, D.},
+  booktitle={2024 IEEE International Conference on Image Processing (ICIP)},
+  pages={319--325},
+  year={2024},
+  organization={IEEE}
+}
 ```
