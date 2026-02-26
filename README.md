@@ -44,7 +44,7 @@ Performance on fossil fuel power plant tasks (Classification & Segmentation).
 
 | Task | Metric | Frozen Backbone | Fine-Tuned (FT) |
 | :--- | :--- | :---: | :---: |
-| **Fuel Classification** | Accuracy (%) | **95.9%** | 88.4% |
+| **Fuel Classification** | Accuracy (%) |88.4% | **95.9%** |
 | **Plume Segmentation** | mIoU | 61.8 | **75.5** |
 
 ---
