@@ -67,11 +67,11 @@ pip install torch torchvision --index-url [https://download.pytorch.org/whl/cu11
 pip install -r requirements.txt
 ```
 
-## 📁 Pretrained Checkpoints
+<!-- ## 📁 Pretrained Checkpoints
 
 You can find the best-performing pretrained checkpoints for the MMAQ model here:
 * **MMAQ Best**: [`checkpoints/mmaq_best.ckpt`](./checkpoints/mmaq_best.ckpt) — The full multi-modal architecture including Sentinel-2, Sentinel-5P, and Tabular encoders.
-* **MMAQ- (S2 only)**: [`checkpoints/mmaq_s2_only.ckpt`](./checkpoints/mmaq_s2_only.ckpt) — Effective version using only Sentinel-2 encoders when other modalities are absent.
+* **MMAQ- (S2 only)**: [`checkpoints/mmaq_s2_only.ckpt`](./checkpoints/mmaq_s2_only.ckpt) — Effective version using only Sentinel-2 encoders when other modalities are absent. -->
 
 ---
 
