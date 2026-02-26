@@ -21,7 +21,7 @@ Data Modalities:
 - Sentinel-5P: Tropospheric column density reprojected to EPSG:32614.
 - Tabular: Land use data including Altitude, Population Density, Area Type, and Station Type.
 
-The sentinel-2 and sentinel-5p data can be downloaded from here 
+The sentinel-2 and sentinel-5p data can be downloaded from [here](https://zenodo.org/records/5764262)
 
 ## 📊 Benchmarks & Results
 
