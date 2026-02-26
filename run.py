@@ -30,8 +30,7 @@ from dataset.data_loaders import (
 from models import build_ssl_model
 from opts.run_opts import RunOptions
 from utils import create_logdir
-from utils.benchmarking.finetune_regressor import finetune_eval
-from utils.benchmarking.linear_regressor import linear_eval
+from utils.benchmarking.linear_regressor import linear_eval, finetune_eval
 from utils.benchmarking.transfer_learning import tf_classification
 from utils.benchmarking.transfer_segmentation import tf_segmentation
 

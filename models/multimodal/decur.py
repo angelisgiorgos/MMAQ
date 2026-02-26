@@ -42,12 +42,16 @@ class DeCUR(BaseMultimodalModel):
 
 
     def forward(self, images: Tensor, tabular: Tensor = None) -> Tensor:
+        # encoder1 extracts Sentinel-2 features from the images dictionary
         features1 = self.encoder1(images)
-        if tabular is not None:
-             features2 = self.encoder2(tabular)
-             embedding = torch.cat([features1, features2], axis=1)
-        else:
-             embedding = features1
+        
+        # encoder2 extracts Sentinel-5P features from the SAME images dictionary
+        # It should NOT process tabular data!
+        features2 = self.encoder2(images)
+        
+        # DeCUR is an image-image dual encoder.
+        embedding = torch.cat([features1, features2], axis=1)
+        
         return embedding
 
 

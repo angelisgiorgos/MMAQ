@@ -3,11 +3,9 @@ import os
 import sys
 import torch
 from lightning.pytorch import LightningModule
-from torch import Tensor
-from torch.nn import MSELoss, Linear, Module
+from torch import Tensor, nn
 
-from torch.nn import CrossEntropyLoss, Linear, Module
-from torch.optim import SGD, Optimizer, Adam
+from torch.optim import Optimizer, Adam
 
 from lightly.utils.benchmarking.topk import mean_topk_accuracy
 from lightly.utils.scheduler import CosineWarmupScheduler
@@ -26,8 +24,8 @@ class TransferClassifier(LightningModule):
     def __init__(
         self,
         args,
-        model: Module,
-        classification_head: Module,
+        model: nn.Module,
+        classification_head: nn.Module,
         batch_size_per_device: int,
         topk: Tuple[int, ...] = (1, 1),
         feature_dim: int = 2048,
@@ -47,7 +45,7 @@ class TransferClassifier(LightningModule):
             feature_dim = 768
         self.feature_dim = feature_dim
 
-        self.criterion = CrossEntropyLoss()
+        self.criterion = nn.CrossEntropyLoss()
 
         self.topk = topk
 
@@ -160,7 +158,7 @@ def tf_classification(args,
         ckpt_path = os.path.join("./checkpoints", args.model + ".ckpt")
     else:
         ckpt_path = args.ckpt_path
-    model.load_state_dict(torch.load(ckpt_path)["state_dict"], strict=False)
+    model.load_state_dict(torch.load(ckpt_path, weights_only=False)["state_dict"], strict=True)
 
     if hasattr(torch, "compile"):
         # Compile model if PyTorch supports it.
@@ -199,7 +197,7 @@ def tf_classification(args,
         feature_dim = 768
 
     
-    classification_head = Linear(feature_dim, num_classes)
+    classification_head = nn.Linear(feature_dim, num_classes)
     
 
     classifier = TransferClassifier(

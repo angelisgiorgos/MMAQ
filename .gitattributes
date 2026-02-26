@@ -1,5 +1,5 @@
 checkpoints/ filter=lfs diff=lfs merge=lfs -text
-/data/angelisg/sociobee/data-fusion/checkpoints/vicreg.ckpt filter=lfs diff=lfs merge=lfs -text
-/data/angelisg/sociobee/data-fusion/checkpoints/mmaq.ckpt filter=lfs diff=lfs merge=lfs -text
-/data/angelisg_new/sociobee/data-fusion/checkpoints/vicreg.ckpt filter=lfs diff=lfs merge=lfs -text
-/data/angelisg_new/sociobee/data-fusion/checkpoints/mmaq_best.ckpt filter=lfs diff=lfs merge=lfs -text
+./checkpoints/vicreg.ckpt filter=lfs diff=lfs merge=lfs -text
+./checkpoints/mmaq.ckpt filter=lfs diff=lfs merge=lfs -text
+./checkpoints/vicreg.ckpt filter=lfs diff=lfs merge=lfs -text
+./checkpoints/mmaq_best.ckpt filter=lfs diff=lfs merge=lfs -text

@@ -9,7 +9,7 @@ from lightning.pytorch.callbacks import (
     ModelCheckpoint,
     LearningRateMonitor,
 )
-from torch.optim import SGD, Optimizer, Adam
+from torch.optim import Optimizer, Adam
 import lightning.pytorch as pl
 import torchmetrics
 import torch
@@ -202,7 +202,6 @@ class Segmentation(pl.LightningModule):
         self.log("test_accuracy", self.test_accuracy.compute())
 
 
-    
     def configure_optimizers(
         self,
     ) -> Tuple[List[Optimizer], List[Dict[str, Union[Any, str]]]]:
@@ -212,7 +211,6 @@ class Segmentation(pl.LightningModule):
         optimizer = Adam(
             parameters,
             lr=self.args.lr * self.batch_size_per_device * self.trainer.world_size / 256,
-            # momentum=0.9,
             weight_decay=0.0,
         )
         scheduler = {
@@ -224,8 +222,6 @@ class Segmentation(pl.LightningModule):
             "interval": "step",
         }
         return [optimizer], [scheduler]
-
-
 
 def tf_segmentation(args,
     train_dataloader: torch.utils.data.DataLoader,
@@ -243,18 +239,15 @@ def tf_segmentation(args,
         config=args
     )
     
-
     # Create logdir based on WandB run name
     logdir = create_logdir(args.datatype, wandb_logger)
-
-    # Train linear classifier.
 
     model = build_ssl_model(args, data_stats)
     if args.ckpt_path is None:
         ckpt_path = os.path.join("./checkpoints", args.model + ".ckpt")
     else:
         ckpt_path = args.ckpt_path
-    model.load_state_dict(torch.load(ckpt_path)["state_dict"], strict=False)
+    model.load_state_dict(torch.load(ckpt_path, weights_only=False)["state_dict"], strict=True)
 
     if hasattr(torch, "compile"):
         # Compile model if PyTorch supports it.
@@ -269,7 +262,6 @@ def tf_segmentation(args,
     else:
         backbone = model.backbone.backbone_S2
 
-    
     model_checkpoint = ModelCheckpoint(
             filename="checkpoint_last_epoch_{epoch:02d}",
             dirpath=logdir,
@@ -285,9 +277,9 @@ def tf_segmentation(args,
 
     trainer = Trainer(
         accelerator="gpu",
-        devices=1,
-        precision=32,
-        # deterministic=True,
+        devices=args.gpu_ids,
+        precision=getattr(args, "precision", 32),
+        deterministic=getattr(args, "deterministic", True),
         callbacks=callbacks,
         logger=wandb_logger,
         max_epochs=100,
@@ -297,7 +289,6 @@ def tf_segmentation(args,
         limit_val_batches=args.limit_val_batches,
         enable_progress_bar=args.enable_progress_bar,
     )
-
 
     classifier = Segmentation(
         args=args,

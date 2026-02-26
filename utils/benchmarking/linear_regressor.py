@@ -4,7 +4,7 @@ import sys
 import torch
 from lightning.pytorch import LightningModule
 from torch import Tensor
-from torch.nn import MSELoss, Linear, Module
+import torch.nn as nn
 from torch.optim import SGD, Optimizer
 from utils import create_logdir
 import torchmetrics
@@ -22,14 +22,13 @@ from losses.contrastive_supervised import ContrastiveRegressionLoss
 from losses.ordinal_entropy import OrdinalEntropy
 
 
-
 class LinearRegressor(LightningModule):
     def __init__(
         self,
         args,
         data_stats,
-        model: Module,
-        regression_head: Module,
+        model: nn.Module,
+        regression_head: nn.Module,
         batch_size_per_device: int,
         feature_dim: int = 2048,
         freeze_model: bool = False,
@@ -113,7 +112,7 @@ class LinearRegressor(LightningModule):
 
     def init_criterion(self):
         if self.args.finetune_loss == "mse":
-            self.criterion = MSELoss()
+            self.criterion = nn.MSELoss()
         elif self.args.finetune_loss == "rlp":
             self.criterion = RandomLinearProjection(self.args)
         elif self.args.finetune_loss == "contrastive_regression":
@@ -158,13 +157,16 @@ class LinearRegressor(LightningModule):
         targets = targets.float().unsqueeze(1)
         loss = self.calculate_loss(features, targets, predictions)
         predictions, targets = undo_normalization(predictions.detach(), targets, self.data_stats)
-        # metrics = {"mae" : self.mae(predictions, targets), "mse": self.mse(predictions, targets), "mape": self.mape(predictions, targets), "r2": self.r2(predictions, targets)}
         return 1e-3 * loss, predictions, targets
 
 
     def training_step(self, batch: Tuple[Tensor, ...], batch_idx: int) -> Tensor:
         loss, predictions, targets = self.shared_step(batch=batch, batch_idx=batch_idx)
-        metrics = {"mae" : self.mae(predictions, targets), "mse": self.mse(predictions, targets), "mape": self.mape(predictions, targets), "r2": self.r2(predictions, targets)}
+        metrics = {
+            "mae" : self.mae(predictions, targets),
+            "mse": self.mse(predictions, targets), 
+            "mape": self.mape(predictions, targets), 
+            "r2": self.r2(predictions, targets)}
         batch_size = len(batch[1])
         log_dict = {f"train_{k}": acc for k, acc in metrics.items()}
         self.log(
@@ -253,11 +255,34 @@ class LinearRegressor(LightningModule):
             self.model.eval()
 
 
-def linear_eval(args,
+class FinetuneLinearRegressor(LinearRegressor):
+    def configure_optimizers(self) -> Tuple[List[Optimizer], List[Dict[str, Union[Any, str]]]]:
+        parameters = list(self.regression_head.parameters())
+        parameters += self.model.parameters()
+        optimizer = SGD(
+            parameters,
+            lr=0.05 * self.batch_size_per_device * self.trainer.world_size / 256,
+            momentum=0.9,
+            weight_decay=0.0,
+        )
+        scheduler = {
+            "scheduler": CosineWarmupScheduler(
+                optimizer=optimizer,
+                warmup_epochs=0,
+                max_epochs=int(self.trainer.estimated_stepping_batches),
+            ),
+            "interval": "step",
+        }
+        return [optimizer], [scheduler]
+
+def run_evaluation(
+    args,
     train_dataloader: torch.utils.data.DataLoader,
     val_dataloader: torch.utils.data.DataLoader,
-    data_stats) -> None:
-    print("Running linear evaluation...")
+    data_stats,
+    is_finetune: bool = False
+) -> None:
+    print(f"Running {'fine-tune' if is_finetune else 'linear'} evaluation...")
 
     base_dir = os.path.dirname(os.path.abspath(sys.argv[0]))
 
@@ -268,23 +293,28 @@ def linear_eval(args,
         config=args
     )
     
-
     # Create logdir based on WandB run name
     logdir = create_logdir(args.datatype, wandb_logger)
 
-    # Train linear classifier.
-
+    # Pretrained model for linear regression.
     model = build_ssl_model(args, data_stats)
+    
+    if is_finetune:
+        setattr(model, "online_regressor", nn.Identity())
+        
     if args.ckpt_path is None:
         ckpt_path = os.path.join("./checkpoints", args.model + ".ckpt")
     else:
         ckpt_path = args.ckpt_path
-    model.load_state_dict(torch.load(ckpt_path, weights_only=False)["state_dict"], strict=True)
+        
+    model.load_state_dict(
+        torch.load(ckpt_path, weights_only=False)["state_dict"], 
+        strict=True
+    )
 
-    if hasattr(torch, "compile"):
+    if not is_finetune and hasattr(torch, "compile"):
         # Compile model if PyTorch supports it.
         model = torch.compile(model)
-
 
     model_checkpoint = ModelCheckpoint(
             filename="checkpoint_last_epoch_{epoch:02d}",
@@ -301,12 +331,12 @@ def linear_eval(args,
 
     trainer = Trainer(
         accelerator="gpu",
-        devices=1,
-        precision=32,
-        deterministic=True,
+        devices=args.gpu_ids,
+        precision=getattr(args, "precision", 32),
+        deterministic=getattr(args, "deterministic", True),
         callbacks=callbacks,
         logger=wandb_logger,
-        max_epochs=args.max_num_epochs,
+        max_epochs=50 if is_finetune else args.max_num_epochs,
         check_val_every_n_epoch=args.check_val_every_n_epoch,
         limit_train_batches=args.limit_train_batches,
         limit_val_batches=args.limit_val_batches,
@@ -314,27 +344,43 @@ def linear_eval(args,
     )
 
     feature_dim = 2048
-    if args.model == "decur":
-        feature_dim = feature_dim*2
-    elif args.model == "mmaq":
-        feature_dim = feature_dim*2
-    elif args.model == "dino":
-        feature_dim = 768
-
+    if is_finetune:
+        if args.model in ["decur", "mmaq", "mmcl"]:
+            feature_dim = 4096
+        elif args.model in ["barlow_twins", "byol", "simclr"]:
+            feature_dim = 2048 + getattr(args, "embedding_dim", 13)
+        elif args.model == "dino":
+            feature_dim = 768
+    else:
+        if args.model == "decur":
+            feature_dim = feature_dim*2
+        elif args.model == "mmaq":
+            feature_dim = feature_dim*2
+        elif args.model == "dino":
+            feature_dim = 768
     
-    
-    regression_head = Linear(feature_dim, 1)
+    regression_head = nn.Linear(feature_dim, 1)
 
-
-    regressor = LinearRegressor(
-        args=args,
-        data_stats=data_stats,
-        model=model,
-        regression_head=regression_head,
-        batch_size_per_device=args.batch_size,
-        feature_dim=feature_dim,
-        freeze_model=True,
-    )
+    if is_finetune:
+        regressor = FinetuneLinearRegressor(
+            args=args,
+            data_stats=data_stats,
+            model=model,
+            regression_head=regression_head,
+            batch_size_per_device=args.batch_size,
+            feature_dim=feature_dim,
+            freeze_model=False,
+        )
+    else:
+        regressor = LinearRegressor(
+            args=args,
+            data_stats=data_stats,
+            model=model,
+            regression_head=regression_head,
+            batch_size_per_device=args.batch_size,
+            feature_dim=feature_dim,
+            freeze_model=True,
+        )
 
     trainer.fit(
         model=regressor,
@@ -347,3 +393,11 @@ def linear_eval(args,
     checkpoint = torch.load(CKPT_PATH)
     regressor.load_state_dict(checkpoint["state_dict"])
     trainer.test(ckpt_path="best", dataloaders=val_dataloader)
+
+
+def linear_eval(args, train_dataloader, val_dataloader, data_stats):
+    run_evaluation(args, train_dataloader, val_dataloader, data_stats, is_finetune=False)
+
+
+def finetune_eval(args, train_dataloader, val_dataloader, data_stats):
+    run_evaluation(args, train_dataloader, val_dataloader, data_stats, is_finetune=True)
