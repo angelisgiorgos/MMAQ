@@ -1,4 +1,6 @@
 # MMAQ: A Multi-Modal Self-Supervised Approach For Estimating Air Quality
+[![Paper](https://img.shields.io/badge/IEEE-Paper-blue)](https://ieeexplore.ieee.org/abstract/document/10647792)
+[![Conference](https://img.shields.io/badge/ICIP-2024-green)](https://2024.ieeeicip.org/)
 
 This repository contains the official implementation of **MMAQ**, as presented at ICIP 2024. MMAQ is a multi-modal self-supervised learning (SSL) framework that integrates Sentinel-2, Sentinel-5P, and tabular land-use data to estimate ground-level air quality.
 
@@ -19,6 +21,7 @@ Data Modalities:
 - Sentinel-5P: Tropospheric column density reprojected to EPSG:32614.
 - Tabular: Land use data including Altitude, Population Density, Area Type, and Station Type.
 
+The sentinel-2 and sentinel-5p data can be downloaded from here 
 
 ## 📊 Benchmarks & Results
 
