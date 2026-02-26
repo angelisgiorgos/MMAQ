@@ -165,8 +165,13 @@ def get_transforms(datatype, train, new_imgsize, is_segmentation=False):
                 T.Resize(new_imgsize),
                 NormalizeRGB(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
             ]
-            if not is_segmentation:
-                transforms_list.insert(1, T.RandomHorizontalFlip())
+            transforms_list.insert(1, T.RandomHorizontalFlip())
+            return T.Compose(transforms_list)
+        elif datatype == "rgb_unimodal" and is_segmentation:
+            transforms_list = [
+                ToTensor(),
+                Resize(new_imgsize)
+            ]
             return T.Compose(transforms_list)
         else:
             transforms_list = [
@@ -178,16 +183,18 @@ def get_transforms(datatype, train, new_imgsize, is_segmentation=False):
             ]
             return T.Compose(transforms_list)
     else:
-        if datatype == "rgb_unimodal":
+        if datatype == "rgb_unimodal" and not is_segmentation:
             transforms_list = [
                 T.ToTensor(),
-                T.Resize(new_imgsize)
+                T.Resize(new_imgsize),
+                NormalizeRGB(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
             ]
-            if not is_segmentation:
-                transforms_list.append(NormalizeRGB(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]))
-            else:
-                transforms_list.insert(0, T.Resize(new_imgsize)) # Added back T.Resize which was inside segmentation block
-                pass # Segmentation validation doesn't normalize RGB in original code
+            return T.Compose(transforms_list)
+        elif datatype == "rgb_unimodal" and is_segmentation:
+            transforms_list = [
+                ToTensor(),
+                Resize(new_imgsize)
+            ]
             return T.Compose(transforms_list)
         else:
             return T.Compose([

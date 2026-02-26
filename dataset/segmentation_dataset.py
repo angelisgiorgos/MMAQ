@@ -203,7 +203,7 @@ class SmokePlumeSegmentationDataset(Dataset):
             if self.transform:
                 img = sample["img"].transpose(1, 2, 0)
                 img = normalize_to_uint8(img)
-                sample["img"] = img.transpose(2, 0, 1).astype(np.float32)
+                sample["img"] = (img.transpose(2, 0, 1).astype(np.float32)) / 255.0
                 sample = self.transform(sample)
         else:
             if self.transform:
