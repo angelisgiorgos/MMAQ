@@ -2,22 +2,18 @@ from typing import Any, Dict, List, Tuple, Union
 import os
 import sys
 import torch
-from lightning.pytorch import LightningModule
+from lightning.pytorch import LightningModule, Trainer
 from torch import Tensor, nn
-
 from torch.optim import Optimizer, Adam
 
 from lightly.utils.benchmarking.topk import mean_topk_accuracy
 from lightly.utils.scheduler import CosineWarmupScheduler
 from lightning.pytorch.loggers import WandbLogger
-from lightning.pytorch import Trainer
+from lightning.pytorch.callbacks import ModelCheckpoint, LearningRateMonitor
+from torchmetrics.classification import F1Score
+
 from models import build_ssl_model
 from utils import create_logdir
-from lightning.pytorch.callbacks import (
-    ModelCheckpoint,
-    LearningRateMonitor,
-)
-from torchmetrics import F1Score
 
 
 class TransferClassifier(LightningModule):
@@ -27,9 +23,10 @@ class TransferClassifier(LightningModule):
         model: nn.Module,
         classification_head: nn.Module,
         batch_size_per_device: int,
-        topk: Tuple[int, ...] = (1, 1),
+        num_classes: int,
         feature_dim: int = 2048,
-        freeze_model: bool = False) -> None:
+        freeze_model: bool = False,
+    ) -> None:
         super().__init__()
 
         self.args = args
@@ -39,17 +36,23 @@ class TransferClassifier(LightningModule):
 
         self.model = model
         self.batch_size_per_device = batch_size_per_device
+
         if args.model == "decur":
-            feature_dim = feature_dim*2
+            feature_dim *= 2
         elif args.model == "dino":
             feature_dim = 768
         self.feature_dim = feature_dim
+        self.num_classes = num_classes
 
         self.criterion = nn.CrossEntropyLoss()
 
-        self.topk = topk
-
-        self.f1 = F1Score(task="multiclass", num_classes=4)
+        # ✅ F1Score for multiclass classification, top_k removed
+        self.f1 = F1Score(
+            task="multiclass",
+            num_classes=num_classes,
+            average="macro",
+            top_k=1
+        )
 
     def forward(self, images: Tensor) -> Tensor:
         if self.freeze_model:
@@ -57,66 +60,73 @@ class TransferClassifier(LightningModule):
                 features = self.model.forward(images).flatten(start_dim=1)
         else:
             features = self.model.forward(images).flatten(start_dim=1)
+
         output: Tensor = self.classification_head(features)
         return output, features
 
-
     def calculate_loss(self, preds, labels):
-        loss = self.criterion(preds, labels)
-        return loss
-
+        return self.criterion(preds, labels)
 
     def shared_step(self, batch):
         images, targets = batch["img"], batch["labels"]
-        predictions, features = self.forward(images)
-        loss = self.calculate_loss(predictions, targets.long())
-        _, predicted_labels = predictions.topk(max(self.topk))
-        topk = mean_topk_accuracy(predicted_labels, targets, k=self.topk)
-        f1 = self.f1(predicted_labels, targets.long())
-        return loss, topk, f1
 
-    
+        predictions, _ = self.forward(images)
+        loss = self.calculate_loss(predictions, targets.long())
+
+        # ✅ Top-k accuracy for logging (optional, does not affect F1)
+        _, predicted_topk = predictions.topk(1, dim=1)
+        topk_dict = mean_topk_accuracy(predicted_topk, targets, k=(1,))
+        top1_accuracy = topk_dict[1]   # extract tensor
+
+        # ✅ F1Score expects [B] class indices
+        pred_labels = torch.argmax(predictions, dim=1)
+        f1 = self.f1(pred_labels, targets.long())
+
+        return loss, {"top1": top1_accuracy}, f1
+
     def training_step(self, batch, batch_idx):
-        loss, topk, _ = self.shared_step(batch=batch)
-        batch_size = len(batch["img"])
-        log_dict = {f"train_top{k}": acc for k, acc in topk.items()}
-        self.log(
-            "train_loss", loss, prog_bar=True, sync_dist=True, batch_size=batch_size
-        )
+        loss, topk, _ = self.shared_step(batch)
+        batch_size = len(batch["img"].shape)
+
+        log_dict = {f"train_{k}": acc for k, acc in topk.items()}
+
+        self.log("train_loss", loss, prog_bar=True, sync_dist=True, batch_size=batch_size)
         self.log_dict(log_dict, sync_dist=True, batch_size=batch_size)
+
         return loss
 
-
     def validation_step(self, batch, batch_idx):
-        loss, topk, f1 = self.shared_step(batch=batch)
+        loss, topk, f1 = self.shared_step(batch)
         batch_size = len(batch["img"])
-        log_dict = {f"val_top{k}": acc for k, acc in topk.items()}
+
+        log_dict = {f"val_{k}": acc for k, acc in topk.items()}
         log_dict.update({"val_f1_score": f1})
+
         self.log("val_loss", loss, prog_bar=True, sync_dist=True, batch_size=batch_size)
         self.log_dict(log_dict, sync_dist=True, batch_size=batch_size)
 
-    
     def test_step(self, batch, batch_idx):
-        loss, topk, f1 = self.shared_step(batch=batch)
+        loss, topk, f1 = self.shared_step(batch)
         batch_size = len(batch["img"])
-        log_dict = {f"test_top{k}": acc for k, acc in topk.items()}
+
+        log_dict = {f"test_{k}": acc for k, acc in topk.items()}
         log_dict.update({"test_f1_score": f1})
+
         self.log("test_loss", loss)
         self.log_dict(log_dict, sync_dist=True, batch_size=batch_size)
 
-    
-    def configure_optimizers(
-        self,
-    ) -> Tuple[List[Optimizer], List[Dict[str, Union[Any, str]]]]:
+    def configure_optimizers(self) -> Tuple[List[Optimizer], List[Dict[str, Union[Any, str]]]]:
         parameters = list(self.classification_head.parameters())
+
         if not self.freeze_model:
-            parameters += self.model.parameters()
+            parameters += list(self.model.parameters())
+
         optimizer = Adam(
             parameters,
             lr=self.args.lr * self.batch_size_per_device * self.trainer.world_size / 256,
-            # momentum=0.9,
             weight_decay=0.0,
         )
+
         scheduler = {
             "scheduler": CosineWarmupScheduler(
                 optimizer=optimizer,
@@ -125,17 +135,18 @@ class TransferClassifier(LightningModule):
             ),
             "interval": "step",
         }
+
         return [optimizer], [scheduler]
 
 
-
-
-
-def tf_classification(args,
+def tf_classification(
+    args,
     train_dataloader: torch.utils.data.DataLoader,
     val_dataloader: torch.utils.data.DataLoader,
     data_stats,
-    num_classes) -> None:
+    num_classes: int,
+) -> None:
+
     print("Running Transfer Learning Classification...")
 
     base_dir = os.path.dirname(os.path.abspath(sys.argv[0]))
@@ -146,37 +157,37 @@ def tf_classification(args,
         offline=args.offline,
         config=args
     )
-    
 
-    # Create logdir based on WandB run name
     logdir = create_logdir(args.datatype, wandb_logger)
 
-    # Train linear classifier.
-
     model = build_ssl_model(args, data_stats)
+
     if args.ckpt_path is None:
         ckpt_path = os.path.join("./checkpoints", args.model + ".ckpt")
     else:
         ckpt_path = args.ckpt_path
-    model.load_state_dict(torch.load(ckpt_path, weights_only=False)["state_dict"], strict=True)
+
+    model.load_state_dict(
+        torch.load(ckpt_path, weights_only=False)["state_dict"],
+        strict=True
+    )
 
     if hasattr(torch, "compile"):
-        # Compile model if PyTorch supports it.
         model = torch.compile(model)
 
-
     model_checkpoint = ModelCheckpoint(
-            filename="checkpoint_last_epoch_{epoch:02d}",
-            dirpath=logdir,
-            monitor="val_top1",
-            mode="max",
-            save_on_train_epoch_end=True,
-            auto_insert_metric_name=False,
-        )
-    callbacks=[
-            LearningRateMonitor(),
-            model_checkpoint,
-            ]
+        filename="checkpoint_last_epoch_{epoch:02d}",
+        dirpath=logdir,
+        monitor="val_top1",
+        mode="max",
+        save_on_train_epoch_end=True,
+        auto_insert_metric_name=False,
+    )
+
+    callbacks = [
+        LearningRateMonitor(),
+        model_checkpoint,
+    ]
 
     trainer = Trainer(
         accelerator="gpu",
@@ -185,7 +196,7 @@ def tf_classification(args,
         deterministic=True,
         callbacks=callbacks,
         logger=wandb_logger,
-        max_epochs=100,
+        max_epochs=args.max_num_epochs,
         check_val_every_n_epoch=args.check_val_every_n_epoch,
         limit_train_batches=args.limit_train_batches,
         limit_val_batches=args.limit_val_batches,
@@ -195,16 +206,17 @@ def tf_classification(args,
     feature_dim = 2048
     if args.model == "dino":
         feature_dim = 768
+    elif args.model == "decur":
+        feature_dim *= 2
 
-    
     classification_head = nn.Linear(feature_dim, num_classes)
-    
 
     classifier = TransferClassifier(
         args=args,
         model=model,
         classification_head=classification_head,
         batch_size_per_device=args.batch_size,
+        num_classes=num_classes,
         freeze_model=True
     )
 
@@ -213,9 +225,11 @@ def tf_classification(args,
         train_dataloaders=train_dataloader,
         val_dataloaders=val_dataloader,
     )
+
     CKPT_PATH = model_checkpoint.best_model_path
     print(CKPT_PATH)
+
     checkpoint = torch.load(CKPT_PATH, weights_only=False)
     classifier.load_state_dict(checkpoint["state_dict"])
+
     trainer.test(model=classifier, dataloaders=val_dataloader)
-    

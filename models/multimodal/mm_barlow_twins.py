@@ -158,10 +158,6 @@ class MM_BarlowTwins(BaseMultimodalModel):
             raise ValueError('Valid schedulers are "cosine" and "anneal"')
         
         return scheduler
-
-
-
-    
     
     
     def configure_optimizers(self) -> Any:
@@ -177,7 +173,6 @@ class MM_BarlowTwins(BaseMultimodalModel):
             {'params': self.online_regressor.parameters(), 'weight_decay': 0.0}
         ], 
         lr=self.args.lr,
-        # momentum=0.9,
         weight_decay=self.args.weight_decay)
         
         scheduler = self.initialize_scheduler(optimizer)

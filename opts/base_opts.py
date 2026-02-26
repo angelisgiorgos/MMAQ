@@ -16,7 +16,7 @@ class BaseOptions:
     def initialize(self, parser):
         """Define the common options that are used in both training and test."""
         # basic parameters
-        parser.add_argument('--seed', default=0, type=int, help='seed for training')
+        parser.add_argument('--seed', default=10, type=int, help='seed for training')
         parser.add_argument('--dataroot', default='./data', help='path to images ')
         parser.add_argument('--samples_file', default="./data/data/editted/pollutant_ssl.csv", type=str)
         parser.add_argument('--datatype', default='multimodal', type=str, help='Trainings model using multmodal simclr')

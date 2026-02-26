@@ -282,7 +282,7 @@ def tf_segmentation(args,
         deterministic=getattr(args, "deterministic", True),
         callbacks=callbacks,
         logger=wandb_logger,
-        max_epochs=100,
+        max_epochs=args.max_num_epochs,
         gradient_clip_val=1.0,
         check_val_every_n_epoch=args.check_val_every_n_epoch,
         limit_train_batches=args.limit_train_batches,
@@ -304,9 +304,9 @@ def tf_segmentation(args,
     )
     CKPT_PATH = model_checkpoint.best_model_path
     print(CKPT_PATH)
-    checkpoint = torch.load(CKPT_PATH)
+    checkpoint = torch.load(CKPT_PATH, weights_only=False)
     classifier.load_state_dict(checkpoint["state_dict"])
-    trainer.test(ckpt_path="best", dataloaders=val_dataloader)
+    trainer.test(model=classifier, dataloaders=val_dataloader)
 
 
 

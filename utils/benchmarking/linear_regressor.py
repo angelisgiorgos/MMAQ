@@ -5,7 +5,7 @@ import torch
 from lightning.pytorch import LightningModule
 from torch import Tensor
 import torch.nn as nn
-from torch.optim import SGD, Optimizer
+from torch.optim import SGD, Adam, Optimizer
 from utils import create_logdir
 import torchmetrics
 from lightly.utils.scheduler import CosineWarmupScheduler
@@ -257,11 +257,10 @@ class FinetuneLinearRegressor(LinearRegressor):
     def configure_optimizers(self) -> Tuple[List[Optimizer], List[Dict[str, Union[Any, str]]]]:
         parameters = list(self.regression_head.parameters())
         parameters += self.model.parameters()
-        optimizer = SGD(
+        optimizer = Adam(
             parameters,
-            lr=0.05 * self.batch_size_per_device * self.trainer.world_size / 256,
-            momentum=0.9,
-            weight_decay=0.0,
+            lr=self.args.lr * self.batch_size_per_device * self.trainer.world_size / 256,
+            weight_decay=self.args.weight_decay,
         )
         scheduler = {
             "scheduler": CosineWarmupScheduler(
@@ -309,6 +308,7 @@ def run_evaluation(
 
     if is_finetune:
         setattr(model, "online_regressor", nn.Identity())
+        model = model.train()
 
     if not is_finetune and hasattr(torch, "compile"):
         # Compile model if PyTorch supports it.
@@ -390,7 +390,7 @@ def run_evaluation(
     print(CKPT_PATH)
     checkpoint = torch.load(CKPT_PATH, weights_only=False)
     regressor.load_state_dict(checkpoint["state_dict"])
-    trainer.test(ckpt_path="best", dataloaders=val_dataloader)
+    trainer.test(model=regressor, dataloaders=val_dataloader)
 
 
 def linear_eval(args, train_dataloader, val_dataloader, data_stats):

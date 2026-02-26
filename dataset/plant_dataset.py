@@ -129,8 +129,6 @@ class PlantDataset(Dataset):
             if self.transform:
                 img = sample["img"].transpose(1, 2, 0)
                 img = normalize_to_uint8(img)
-                
-                
                 img = Image.fromarray(img).resize((256, 256))
                 sample["img"] = self.transform(img)
         else:

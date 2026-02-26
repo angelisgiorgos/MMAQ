@@ -36,19 +36,12 @@ class RunOptions(BaseOptions):
         parser.add_argument('--check_val_every_n_epoch', default=1, type=int, help='Validation every N epochs')
 
         # Pretraining-specific args (from training_opts.py)
-        parser.add_argument('--print_freq', type=int, default=100,
-                            help='frequency of showing training results on console')
-        parser.add_argument('--save_latest_freq', type=int, default=5000,
-                            help='frequency of saving the latest results')
-        parser.add_argument('--save_epoch_freq', type=int, default=5,
-                            help='frequency of saving checkpoints at the end of epochs')
         parser.add_argument('--dropout', default=None, type=none_or_true)
         parser.add_argument('--dropout_p_second_to_last_layer', default=0.0, type=float)
         parser.add_argument('--dropout_p_last_layer', default=0.0, type=float)
         parser.add_argument('--lambda_0', default=0.5, type=float)
         parser.add_argument('--optimizer', type=str, default='adam',
                             help='optimizer selected for training')
-        parser.add_argument('--heteroscedastic', action='store_true')
         parser.add_argument('--warmup_epochs', type=int, default=10,
                             help='number of warmup epochs with the initial learning rate')
         parser.add_argument('--n_epochs_decay', type=int, default=100,

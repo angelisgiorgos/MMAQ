@@ -39,22 +39,20 @@ def load_rgb_unimodal_datasets(args):
     """
     data_stats = DatasetStatistics()
 
-    if args.linear_eval:
-        train_transform = T.Compose([
-            T.RandomResizedCrop(args.img_size),
-            T.RandomHorizontalFlip(),
-            T.ToTensor(),
-            T.Normalize(mean=IMAGENET_NORMALIZE["mean"], std=IMAGENET_NORMALIZE["std"]),
-        ])
+    train_transform = T.Compose([
+        T.RandomResizedCrop(args.img_size),
+        T.RandomHorizontalFlip(),
+        T.ToTensor(),
+        T.Normalize(mean=IMAGENET_NORMALIZE["mean"], std=IMAGENET_NORMALIZE["std"]),
+    ])
+    if args.model == "dino":
+        train_transform = DINOTransform()
+    elif args.model == "simclr":
+        train_transform = SimCLRTransform()
+    elif args.model == "byol":
+        train_transform = BYOLTransform()
     else:
-        if args.model == "dino":
-            train_transform = DINOTransform()
-        elif args.model == "simclr":
-            train_transform = SimCLRTransform()
-        elif args.model == "byol":
-            train_transform = BYOLTransform()
-        else:
-            raise ValueError(f"Unknown model type for RGB unimodal: {args.model}")
+        raise ValueError(f"Unknown model type for RGB unimodal: {args.model}")
 
     val_transform = T.Compose([
         T.Resize(256),
@@ -163,8 +161,8 @@ def get_transforms(datatype, train, new_imgsize, is_segmentation=False):
     if train:
         if datatype == "rgb_unimodal":
             transforms_list = [
-                ToTensor(),
-                Resize(new_imgsize),
+                T.ToTensor(),
+                T.Resize(new_imgsize),
                 NormalizeRGB(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
             ]
             if not is_segmentation:
@@ -182,8 +180,8 @@ def get_transforms(datatype, train, new_imgsize, is_segmentation=False):
     else:
         if datatype == "rgb_unimodal":
             transforms_list = [
-                ToTensor(),
-                Resize(new_imgsize)
+                T.ToTensor(),
+                T.Resize(new_imgsize)
             ]
             if not is_segmentation:
                 transforms_list.append(NormalizeRGB(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]))

@@ -85,14 +85,14 @@ class MMAQ(BaseMultimodalModel):
     def forward(self, image: Tensor, tabular: Tensor = None, mode="img_both"):
         f1 = self.encoder1(image)
 
-        if mode == "img1":
+        if self.args.task == "transfer_learning" or self.args.task == "transfer_segmentation":
             return f1
 
-        f2 = self.encoder2(image)
-
-        if mode == "img_both":
+        if self.args.task == "linear_eval" or self.args.task == "fine_tune":
+            f2 = self.encoder2(image)
             return torch.cat([f1, f2], dim=1)
 
+        
         if mode == "tab":
             f_tab = self.tabular1(tabular)
             return torch.cat([f1, f_tab], dim=1)
