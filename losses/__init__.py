@@ -8,7 +8,6 @@ from losses.dcl import DCL, DCLW
 from lightly.loss import NegativeCosineSimilarity
 from lightly.loss import BarlowTwinsLoss
 from losses.dro_loss import DRO_Loss
-from losses.decur_loss import DeCURLoss
 
 
 def select_loss_imaging(args):

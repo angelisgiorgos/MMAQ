@@ -40,7 +40,6 @@ class PearsonCorrelation(nn.Module):
         return correlation
 
 
-
 def autocorr(z: torch.Tensor) -> torch.Tensor:
     assert z.dim() == 3, "not batch"
     fz = fft.rfft(z)  # B x N x Df (= 1 + D / 2)

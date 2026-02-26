@@ -22,8 +22,7 @@ class TabularEncoder(nn.Module):
         self.args = args
 
         self.input_size = getattr(args, 'input_size', getattr(args, 'tabular_input', 8))
-        self.encoder_num_layers = getattr(args, 'encoder_num_layers', getattr(args, 'n_layers_tabular', 3))
-        self.embedding_dim = args.embedding_dim
+        self.embedding_dim = args.tabular_net_features
 
         # Check if we are loading a pretrained model
         if getattr(args, 'checkpoint', None):
@@ -32,15 +31,22 @@ class TabularEncoder(nn.Module):
             state_dict = loaded_chkpt['state_dict']
             self.input_size = original_args.get('input_size', getattr(original_args, 'tabular_input', 8))
             
-            if 'encoder_tabular.encoder.1.running_mean' in state_dict.keys():
-                encoder_name = 'encoder_tabular.encoder.'
-                self.encoder = self.build_encoder(original_args)
-            elif 'encoder_projector_tabular.encoder.2.running_mean' in state_dict.keys():
-                encoder_name = 'encoder_projector_tabular.encoder.'
-                self.encoder = self.build_encoder_bn_old(original_args)
-            else:
-                encoder_name = 'encoder_projector_tabular.encoder.'
-                self.encoder = self.build_encoder_no_bn(original_args)
+            # Legacy TabularInitial checkpoint key mapping
+            key_mapping = {
+                "encoder_tabular.linear1.": "encoder_tabular.encoder.0.",
+                "encoder_tabular.bn1.": "encoder_tabular.encoder.1.",
+                "encoder_tabular.linear.": "encoder_tabular.encoder.3.",
+                "encoder_tabular.bn2.": "encoder_tabular.encoder.4.",
+                "encoder_tabular.output.": "encoder_tabular.encoder.6.",
+            }
+            for k in list(state_dict.keys()):
+                for old_key, new_key in key_mapping.items():
+                    if k.startswith(old_key):
+                        state_dict[k.replace(old_key, new_key)] = state_dict.pop(k)
+                        break
+
+            encoder_name = 'encoder_tabular.encoder.'
+            self.encoder = self.build_encoder(original_args)
 
             # Split weights
             state_dict_encoder = {}
@@ -63,21 +69,10 @@ class TabularEncoder(nn.Module):
 
     def build_encoder(self, args) -> nn.Sequential:
         modules = [nn.Linear(self.input_size, self.embedding_dim)]
-        for _ in range(self.encoder_num_layers-1):
-            modules.extend([nn.BatchNorm1d(self.embedding_dim), nn.ReLU(), nn.Linear(self.embedding_dim, self.embedding_dim)])
+        modules.extend([nn.BatchNorm1d(self.embedding_dim), nn.ReLU(), nn.Linear(self.embedding_dim, self.embedding_dim*2)])
+        modules.extend([nn.BatchNorm1d(self.embedding_dim*2), nn.ReLU(), nn.Linear(self.embedding_dim*2, self.embedding_dim*4)])
         return nn.Sequential(*modules)
     
-    def build_encoder_no_bn(self, args) -> nn.Sequential:
-        modules = [nn.Linear(self.input_size, self.embedding_dim)]
-        for _ in range(self.encoder_num_layers-1):
-            modules.extend([nn.ReLU(), nn.Linear(self.embedding_dim, self.embedding_dim)])
-        return nn.Sequential(*modules)
-
-    def build_encoder_bn_old(self, args) -> nn.Sequential:
-        modules = [nn.Linear(self.input_size, self.embedding_dim)]
-        for _ in range(self.encoder_num_layers-1):
-            modules.extend([nn.ReLU(), nn.BatchNorm1d(self.embedding_dim), nn.Linear(self.embedding_dim, self.embedding_dim)])
-        return nn.Sequential(*modules)
 
     def init_weights(self, m: nn.Module, init_gain = 0.02) -> None:
         """
@@ -111,9 +106,33 @@ class BestofBothWorlds(BaseMultimodalModel):
     Args:
         LightningModule (_type_): _description_
     """    
-    def __init__(self, args, data_stats) -> None:
+    def __init__(self, args, data_stats=None) -> None:
         super().__init__(args, data_stats)
         self.online_regressor = OnlineLinearRegressor(self.data_stats, feature_dim=self.pooled_dim)
+
+    def load_state_dict(self, state_dict, strict: bool = True, assign: bool = False): # type: ignore
+        # Handle state dict mismatches between legacy TabularInitial checkpoints
+        # and the new TabularEncoder module naming structure.
+        state_dict_local = dict(state_dict) # type: ignore
+        key_mapping = {
+            "encoder_tabular.linear1.": "encoder_tabular.encoder.0.",
+            "encoder_tabular.bn1.": "encoder_tabular.encoder.1.",
+            "encoder_tabular.linear.": "encoder_tabular.encoder.3.",
+            "encoder_tabular.bn2.": "encoder_tabular.encoder.4.",
+            "encoder_tabular.output.": "encoder_tabular.encoder.6.",
+        }
+        for k in list(state_dict_local.keys()):
+            for old_key, new_key in key_mapping.items():
+                if k.startswith(old_key):
+                    state_dict_local[k.replace(old_key, new_key)] = state_dict_local.pop(k)
+                    break
+
+        # PyTorch 2.1+ supports assign=False. Older versions don't have it.
+        # We can just pass strict and then **kwargs dynamically if needed, or check kwargs.
+        try:
+            return super().load_state_dict(state_dict_local, strict=strict, assign=assign)
+        except TypeError:
+            return super().load_state_dict(state_dict_local, strict=strict)
 
     def _build_backbones(self):
         self.backbone = S2Backbone(self.args)
@@ -230,69 +249,6 @@ class BestofBothWorlds(BaseMultimodalModel):
             raise ValueError('Valid schedulers are "cosine" and "anneal"')
         
         return scheduler
-    
-    def load_state_dict(self, state_dict: Dict[str, Tensor], strict: bool = True):
-        # Handle legacy weights from older TabularNet architectures
-        # The old tabular attention had layers like linear1, bn1, linear (attention), bn2, output
-        # The new SCARF TabularEncoder has nn.Sequential blocks named net.0, net.2, etc. (if no bn)
-        
-        legacy_keys = list(state_dict.keys())
-        current_state = self.state_dict()
-        
-        for k in legacy_keys:
-            if "encoder_tabular." in k:
-                # We attempt to dynamically map or drop old keys if they do not match the new encoder
-                # In SCARF, the new TabularEncoder builds a sequential net named 'encoder'
-                mapped_key = None
-                
-                if "linear1.weight" in k:
-                    mapped_key = "encoder_tabular.encoder.0.weight"
-                elif "linear1.bias" in k:
-                    mapped_key = "encoder_tabular.encoder.0.bias"
-                elif "bn1.weight" in k:
-                    mapped_key = "encoder_tabular.encoder.1.weight"
-                elif "bn1.bias" in k:
-                    mapped_key = "encoder_tabular.encoder.1.bias"
-                elif "bn1.running_mean" in k:
-                    mapped_key = "encoder_tabular.encoder.1.running_mean"
-                elif "bn1.running_var" in k:
-                    mapped_key = "encoder_tabular.encoder.1.running_var"
-                elif "bn1.num_batches_tracked" in k:
-                    mapped_key = "encoder_tabular.encoder.1.num_batches_tracked"
-                elif "linear.weight" in k:
-                    mapped_key = "encoder_tabular.encoder.2.weight"
-                elif "linear.bias" in k:
-                    mapped_key = "encoder_tabular.encoder.2.bias"
-                elif "bn2.weight" in k:
-                    mapped_key = "encoder_tabular.encoder.3.weight"
-                elif "bn2.bias" in k:
-                    mapped_key = "encoder_tabular.encoder.3.bias"
-                elif "bn2.running_mean" in k:
-                    mapped_key = "encoder_tabular.encoder.3.running_mean"
-                elif "bn2.running_var" in k:
-                    mapped_key = "encoder_tabular.encoder.3.running_var"
-                elif "bn2.num_batches_tracked" in k:
-                    mapped_key = "encoder_tabular.encoder.3.num_batches_tracked"
-                elif "output.weight" in k:
-                    if 'encoder_tabular.encoder.4.weight' in current_state:
-                         mapped_key = "encoder_tabular.encoder.4.weight"
-                elif "output.bias" in k:
-                    if 'encoder_tabular.encoder.4.bias' in current_state:
-                         mapped_key = "encoder_tabular.encoder.4.bias"
-
-                if mapped_key:
-                    # Check if sizes match
-                    if mapped_key in current_state and current_state[mapped_key].shape == state_dict[k].shape:
-                        state_dict[mapped_key] = state_dict.pop(k)
-                    else:
-                        # Drop the mismatched key
-                        state_dict.pop(k)
-                else:
-                    # Drop unmatched legacy tabular keys
-                    if k in state_dict:
-                        state_dict.pop(k)
-                        
-        return super().load_state_dict(state_dict, strict=True)
 
     
     def configure_optimizers(self) -> Tuple[Dict, Dict]:

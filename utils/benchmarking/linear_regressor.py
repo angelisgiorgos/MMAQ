@@ -17,9 +17,7 @@ from lightning.pytorch.callbacks import (
 from lightning.pytorch import Trainer
 from models import build_ssl_model
 from utils.utils import undo_normalization
-from losses.supervised_rlp import RandomLinearProjection
-from losses.contrastive_supervised import ContrastiveRegressionLoss
-from losses.ordinal_entropy import OrdinalEntropy
+from losses.supervised_losses import ContrastiveRegressionLoss, RandomLinearProjection, OrdinalEntropy
 
 
 class LinearRegressor(LightningModule):

@@ -75,6 +75,7 @@ class RunOptions(BaseOptions):
         parser.add_argument('--tau_plus', default=0.1, type=float, help='Positive class prior')
         parser.add_argument('--beta', default=1.0, type=float, help='Choose loss function')
         parser.add_argument('--alpha_weight', default=0.75, type=float, help='Alpha weight values')
+        parser.add_argument('--uncertainty', action='store_true', help='Enable uncertainty in case of MMAQ Loss')
 
         # Transfer Learning / Segmentation args (from tf_opts.py)
         parser.add_argument('--tf_datapath', default="/data/angelisg/sociobee/CO2_MultiModal/data", type=str, help='transfer learning data path')

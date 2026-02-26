@@ -9,23 +9,23 @@ class TabularAttention(nn.Module):
         super(TabularAttention, self).__init__()
         self.linear1 = nn.Linear(args.tabular_input, args.tabular_net_features // 2)
         self.relu = nn.ReLU()
-        self.layer_norm1 = nn.LayerNorm(args.tabular_net_features // 2)
+        self.layer_norm = nn.LayerNorm(args.tabular_net_features // 2)
         self.attention = Attention_Layer(args.tabular_net_features // 2)
-        self.layer_norm2 = nn.LayerNorm(args.tabular_net_features // 2)
+        self.layernorm2 = nn.LayerNorm(args.tabular_net_features // 2)
         self.linear = nn.Linear(args.tabular_net_features // 2, args.tabular_net_features // 2)
         self.relu2 = nn.ReLU()
-        self.layernorm3 = nn.LayerNorm(args.tabular_net_features // 2)
+        # self.layernorm3 = nn.LayerNorm(args.tabular_net_features // 2)
         self.output = nn.Linear(args.tabular_net_features // 2, args.tabular_net_features)
     
     def forward(self, x):
         x = self.linear1(x)
         x = self.relu(x)
-        x = self.layer_norm1(x)
+        x = self.layer_norm(x)
         x = self.attention(x)
-        x = self.layer_norm2(x)
+        x = self.layernorm2(x)
         x = self.linear(x)
         x = self.relu2(x)
-        x = self.layernorm3(x)
+        # x = self.layernorm3(x)
         out = self.output(x)
         return out
 
@@ -55,20 +55,35 @@ class DANet(nn.Module):
 
 
 class TabularInitial(nn.Module):
-    def __init__(self, args):
+    def __init__(self, args) -> None:
         super(TabularInitial, self).__init__()
-        self.net = nn.Sequential(
-            nn.Linear(args.tabular_input, args.tabular_net_features // 2),
-            nn.ReLU(),
-            nn.Linear(args.tabular_net_features // 2, args.tabular_net_features),
-            nn.ReLU(),
-            nn.Linear(args.tabular_net_features, args.tabular_net_features),
-            nn.ReLU(),
-            nn.Linear(args.tabular_net_features, args.tabular_net_features)
-        )
-    
-    def forward(self, x):
-        return self.net(x)
+        self.args = args
+
+        self.input_size = getattr(args, 'input_size', getattr(args, 'tabular_input', 8))
+
+        print(self.args.tabular_net_features)
+        # === MATCH CHECKPOINT STRUCTURE EXACTLY ===
+        self.linear1 = nn.Linear(self.input_size, self.args.tabular_net_features)
+        self.bn1 = nn.BatchNorm1d(self.args.tabular_net_features)
+
+        self.linear = nn.Linear(self.args.tabular_net_features*2, self.args.tabular_net_features*2)
+        self.bn2 = nn.BatchNorm1d(self.args.tabular_net_features*2)
+
+        self.output = nn.Linear(self.args.tabular_net_features*2, self.args.tabular_net_features*4)
+
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        x = self.linear1(x)
+        x = self.bn1(x)
+        x = torch.relu(x)
+
+        x = self.linear(x)
+        x = self.bn2(x)
+        x = torch.relu(x)
+
+        x = self.output(x)
+
+        return x
 
 
 class TabularNet(nn.Module):

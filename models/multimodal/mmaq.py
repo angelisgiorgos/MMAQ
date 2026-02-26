@@ -3,8 +3,8 @@ import torchmetrics
 from torch import nn, Tensor
 from models.backbones.model import S2Backbone, S5Backbone
 from models.projector.mmaq_projector import MMAQProjector, AQRProjector
-from models.backbones.tabularnets import TabularAttention, DANet
-from losses.decur_loss import MultiModalDecur
+from models.backbones.tabularnets import TabularAttention
+from losses.mmaq_loss import MMAQLoss 
 from losses.mixup import MixUPLoss
 from flash.core.optimizers import LARS
 from utils.benchmarking.online_regressor import OnlineLinearRegressor
@@ -42,12 +42,7 @@ class MMAQ(BaseMultimodalModel):
 
         self.pooled_dim = 2048
 
-        if self.args.tabular_net == "initial":
-            self.tabular_encoder = TabularAttention(self.args)
-        elif self.args.tabular_net == "danet":
-            self.tabular_encoder = DANet()
-        else:
-            raise ValueError(f"Unknown tabular_net: {self.args.tabular_net}")
+        self.tabular1 = TabularAttention(self.args)
 
     def _build_projectors(self):
         imaging_sizes = [
@@ -74,7 +69,7 @@ class MMAQ(BaseMultimodalModel):
         self.bn = nn.BatchNorm1d(imaging_sizes[-1], affine=False)
 
     def _build_losses(self):
-        self.criterion = MultiModalDecur(self.args, self.bn)
+        self.criterion = MMAQLoss(self.args, self.bn, uncertainty=self.args.uncertainty)
         self.mixup = MixUPLoss(self.args, self.bn, 5.0, 0.005)
 
     def _build_metrics(self):
@@ -99,11 +94,11 @@ class MMAQ(BaseMultimodalModel):
             return torch.cat([f1, f2], dim=1)
 
         if mode == "tab":
-            f_tab = self.tabular_encoder(tabular)
+            f_tab = self.tabular1(tabular)
             return torch.cat([f1, f_tab], dim=1)
 
         # full multimodal
-        f_tab = self.tabular_encoder(tabular)
+        f_tab = self.tabular1(tabular)
         return torch.cat([f1, f2, f_tab], dim=1)
 
     # ============================================================
@@ -122,7 +117,7 @@ class MMAQ(BaseMultimodalModel):
 
         f1_all = self.encoder1(ims)
         f2_all = self.encoder2(ims)
-        f_tab_all = self.tabular_encoder(tabs)
+        f_tab_all = self.tabular1(tabs)
 
         if self.projector_type == "aqr":
             z1_all = self.projector1(f1_all, f_tab_all)

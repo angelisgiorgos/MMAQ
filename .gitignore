@@ -13,7 +13,8 @@ experiments/
 wandb/
 data/
 runs/
-
+ipynb_checkpoints
 
 lightning_logs/
 *.tar.gz
+checkpoints/

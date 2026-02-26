@@ -7,6 +7,13 @@ warnings.filterwarnings("ignore")
 
 import torch
 import torch.multiprocessing
+import argparse
+
+try:
+    torch.serialization.add_safe_globals([argparse.Namespace])
+except AttributeError:
+    pass  # For older PyTorch versions
+
 from lightning.pytorch import Trainer
 from lightning.pytorch.callbacks import (
     DeviceStatsMonitor, 
