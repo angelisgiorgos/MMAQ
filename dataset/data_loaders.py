@@ -11,7 +11,7 @@ from torch.utils.data import ConcatDataset, DataLoader, RandomSampler
 
 # Project-specific imports
 from dataset.plant_dataset import PlantDataset
-from dataset.SatelliteConstrativeDataset import SatelliteContrastiveDataset
+from dataset.SatelliteConstrativeDataset import SatelliteContrastiveDataset, DatasetTextCollate
 from dataset.segmentation_dataset import SmokePlumeSegmentationDataset
 from dataset.transforms import (
     ChangeBandOrder,
@@ -135,18 +135,25 @@ def load_datasets(args):
     samples_df = samples_df[~np.isnan(samples_df.no2)]
 
     train, val = split_samples_df(samples_df, test_size=0.2)
+
+    if args.tabular_as_text:
+        collate_fn = DatasetTextCollate(tokenizer_name=args.tokenizer_name, max_length=args.max_length)
+    else:
+        collate_fn = None
     
     train_dataset = SatelliteContrastiveDataset(
         args=args,
         data_tabular=train,
         augmentation=train_aug_transforms,
         transforms=train_default_transforms,
+        collate_fn=collate_fn
     )
     val_dataset = SatelliteContrastiveDataset(
         args=args,
         data_tabular=val,
         augmentation=val_default_transforms,
         transforms=val_default_transforms,
+        collate_fn=collate_fn
     )
 
     return train_dataset, val_dataset, data_stats

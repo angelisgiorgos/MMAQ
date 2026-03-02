@@ -10,6 +10,7 @@ from .vicreg import VICReg
 from .mocov2 import MoCoV2
 from .simsiam import SimSiam
 from .multimodal.mmaq import MMAQ
+from .multimodal.mmaqvit import MMAQViT
 from .dino import DINO
 
 
@@ -38,6 +39,8 @@ def build_ssl_model(args, data_stats):
         model = MoCoV2(args, data_stats)
     elif args.model == "mmaq":
         model = MMAQ(args, data_stats)
+    elif args.model == "mmaqvit":
+        model = MMAQViT(args, data_stats)
     elif args.model == "dino":
         model = DINO(args, data_stats)
     else:

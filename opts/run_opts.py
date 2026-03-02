@@ -37,6 +37,7 @@ class RunOptions(BaseOptions):
 
         # Pretraining-specific args (from training_opts.py)
         parser.add_argument('--dropout', default=None, type=none_or_true)
+        parser.add_argument("--tabular_as_text", action="store_true", help="Convert tabular metadata into text descriptions instead of numeric vector")
         parser.add_argument('--dropout_p_second_to_last_layer', default=0.0, type=float)
         parser.add_argument('--dropout_p_last_layer', default=0.0, type=float)
         parser.add_argument('--lambda_0', default=0.5, type=float)

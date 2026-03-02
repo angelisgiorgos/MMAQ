@@ -110,3 +110,85 @@ class MMNTXentLoss(torch.nn.Module):
         loss = alpha * loss_a + (1 - alpha) * loss_b
 
         return loss, logits_ab, labels
+
+
+
+class MultimodalJointLoss(nn.Module):
+
+    def __init__(self, temperature=0.1,
+                 lambda_align=1.0,
+                 lambda_var=1.0,
+                 lambda_cov=0.1):
+
+        super().__init__()
+
+        self.temperature = temperature
+        self.lambda_align = lambda_align
+        self.lambda_var = lambda_var
+        self.lambda_cov = lambda_cov
+
+    # ----------------------------------------------------------
+    # InfoNCE
+    # ----------------------------------------------------------
+    def info_nce(self, z1, z2):
+
+        z1 = F.normalize(z1, dim=1)
+        z2 = F.normalize(z2, dim=1)
+
+        logits = torch.mm(z1, z2.t()) / self.temperature
+        labels = torch.arange(z1.size(0)).to(z1.device)
+
+        return F.cross_entropy(logits, labels)
+
+    # ----------------------------------------------------------
+    # VICReg Regularization
+    # ----------------------------------------------------------
+    def variance_loss(self, z):
+
+        std = torch.sqrt(z.var(dim=0) + 1e-4)
+        return torch.mean(F.relu(1 - std))
+
+    def covariance_loss(self, z):
+
+        z = z - z.mean(dim=0)
+        cov = (z.T @ z) / (z.size(0) - 1)
+        off_diag = cov - torch.diag(torch.diag(cov))
+        return off_diag.pow(2).sum() / z.size(1)
+
+    # ----------------------------------------------------------
+    # Full Loss
+    # ----------------------------------------------------------
+    def forward(self, outputs, targets=None):
+
+        f_s2 = outputs["s2"]
+        f_s5 = outputs["s5"]
+        f_txt = outputs["txt"]
+        f_fused = outputs["fused"]
+
+        # Multi-view alignment
+        loss_s2_s5 = self.info_nce(f_s2, f_s5)
+        loss_s2_txt = self.info_nce(f_s2, f_txt)
+        loss_s5_txt = self.info_nce(f_s5, f_txt)
+
+        align_loss = loss_s2_s5 + loss_s2_txt + loss_s5_txt
+
+        # VICReg regularization
+        var_loss = (
+            self.variance_loss(f_fused)
+        )
+
+        cov_loss = (
+            self.covariance_loss(f_fused)
+        )
+
+        vicreg_loss = (
+            self.lambda_var * var_loss +
+            self.lambda_cov * cov_loss
+        )
+
+        total = (
+            self.lambda_align * align_loss +
+            vicreg_loss
+        )
+
+        return total
