@@ -2,22 +2,27 @@ import torch
 import torch.nn as nn
 
 class UncertaintyRevised(nn.Module):
-    def __init__(self):
+    def __init__(self, num_losses: int = 4):
         super().__init__()
 
-        self.log_vars = nn.Parameter(torch.FloatTensor([0.8, 0.8, 0.8, 1]))
+        if num_losses == 4:
+            init_vals = [0.8, 0.8, 0.8, 1.0]
+        else:
+            init_vals = [0.8] * (num_losses - 1) + [1.0]
 
-    def forward(self, loss1, loss2, loss3, loss4):
+        self.log_vars = nn.Parameter(torch.FloatTensor(init_vals))
 
-        loss1 = 1 / (self.log_vars[0] ** 2) * loss1 + torch.log(1 + self.log_vars[0] ** 2)
-        loss2 = 1 / (self.log_vars[1] ** 2) * loss2 + torch.log(1 + self.log_vars[1] ** 2)
-        loss3 = 1 / (self.log_vars[2] ** 2) * loss3 + torch.log(1 + self.log_vars[2] ** 2)
-        loss4 = 1 / (self.log_vars[3] ** 2) * loss4 + torch.log(1 + self.log_vars[3] ** 2)
+    def forward(self, *losses):
 
+        total_loss = 0.0
 
-        loss_weight = torch.abs(2 - torch.abs(self.log_vars[0]) - torch.abs(self.log_vars[1]) - torch.abs(self.log_vars[2]) - torch.abs(self.log_vars[3]))
+        for i, loss in enumerate(losses):
+            total_loss += 1 / (self.log_vars[i] ** 2) * loss + torch.log(1 + self.log_vars[i] ** 2)
 
-        return loss1 + loss2 + loss3 + loss4 + loss_weight
+        sum_abs_log_vars = torch.sum(torch.abs(self.log_vars))
+        loss_weight = torch.abs(2 - sum_abs_log_vars)
+
+        return total_loss + loss_weight
 
 
 
