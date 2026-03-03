@@ -12,7 +12,7 @@ class MMAQLoss(nn.Module):
         self.uncertainty = uncertainty
 
         if self.uncertainty:
-            self.uncert = UncertaintyRevised()
+            self.uncert = UncertaintyRevised(num_losses=4)
 
     # --------------------------------------------------
     # Utilities

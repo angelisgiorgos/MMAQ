@@ -233,7 +233,7 @@ class SatelliteContrastiveDataset(Dataset):
             )
 
         # ================== SSL TRAINING ==================
-        if self.args.pretrain:
+        if self.args.task == "pretrain":
             imaging_views, unaugmented_image = (
                 self.generate_imaging_views(sample)
             )

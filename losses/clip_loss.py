@@ -3,6 +3,7 @@ from typing import Tuple, List
 import torch
 from torch import nn
 import torch.nn.functional as F
+from losses.uncertainty import UncertaintyRevised
 
 
 class CLIPLoss(torch.nn.Module):
@@ -118,7 +119,8 @@ class MultimodalJointLoss(nn.Module):
     def __init__(self, temperature=0.1,
                  lambda_align=1.0,
                  lambda_var=1.0,
-                 lambda_cov=0.1):
+                 lambda_cov=0.1,
+                 uncertainty=False):
 
         super().__init__()
 
@@ -126,6 +128,10 @@ class MultimodalJointLoss(nn.Module):
         self.lambda_align = lambda_align
         self.lambda_var = lambda_var
         self.lambda_cov = lambda_cov
+        self.uncertainty = uncertainty
+
+        if self.uncertainty:
+            self.uncert = UncertaintyRevised(num_losses=2)
 
     # ----------------------------------------------------------
     # InfoNCE
@@ -185,10 +191,17 @@ class MultimodalJointLoss(nn.Module):
             self.lambda_var * var_loss +
             self.lambda_cov * cov_loss
         )
+        
 
-        total = (
-            self.lambda_align * align_loss +
-            vicreg_loss
-        )
+        if not self.uncertainty:
+            total = (
+                self.lambda_align * align_loss +
+                vicreg_loss
+            )
+        else:
+            total = self.uncert(
+                align_loss,
+                vicreg_loss
+            )
 
         return total

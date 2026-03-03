@@ -4,6 +4,7 @@ import torch.nn.functional as F
 import timm
 from transformers import AutoModel
 import torchmetrics
+import lightning.pytorch as pl
 from flash.core.optimizers import LARS
 from utils.benchmarking.online_regressor import OnlineLinearRegressor
 from lightly.utils.scheduler import CosineWarmupScheduler
@@ -56,7 +57,7 @@ class MLPProjector(nn.Module):
 # MMAQ-ViT
 # ============================================================
 
-class MMAQViT(nn.Module):
+class MMAQViT(pl.LightningModule):
     def __init__(self, args, data_stats):
         super().__init__()
         self.args = args
@@ -85,7 +86,7 @@ class MMAQViT(nn.Module):
         # --------------------------------------------------
         self.online_regressor = OnlineLinearRegressor(
             self.data_stats,
-            feature_dim=self.embed_dim * 2
+            feature_dim=self.embed_dim
         )
 
         self._build_backbones()
@@ -98,15 +99,18 @@ class MMAQViT(nn.Module):
             "vit_small_patch16_224",
             pretrained=True,
             num_classes=0,
-            channels=12
+            in_chans=12
         )
 
         self.vit_s5 = timm.create_model(
             "vit_small_patch16_224",
             pretrained=True,
             num_classes=0,
-            channels=1
+            in_chans=1
         )
+
+        self.vit_s2_proj = nn.Linear(384, self.embed_dim)
+        self.vit_s5_proj = nn.Linear(384, self.embed_dim)
 
     # --------------------------------------------------
     # Projectors
@@ -118,7 +122,7 @@ class MMAQViT(nn.Module):
         self.proj_fused = MLPProjector(self.embed_dim)
     
     def _build_losses(self):
-        self.ssl_loss = MultimodalJointLoss()
+        self.ssl_loss = MultimodalJointLoss(uncertainty=self.args.uncertainty)
 
     def _build_metrics(self):
         self.val_mae = torchmetrics.MeanAbsoluteError(dist_sync_on_step=True)
@@ -141,6 +145,10 @@ class MMAQViT(nn.Module):
         )
 
         f_txt = text_out.last_hidden_state[:, 0]  # CLS token
+
+        # Project ViT features to match BERT dimensions (384 -> 768)
+        f_s2 = self.vit_s2_proj(f_s2)
+        f_s5 = self.vit_s5_proj(f_s5)
 
         # Stack tokens (B, 3, 768)
         tokens = torch.stack([f_s2, f_s5, f_txt], dim=1)
@@ -175,10 +183,10 @@ class MMAQViT(nn.Module):
             "fused": f_fused_1
         }
 
-        loss_ssl = self.criterion(fs)
+        loss_ssl = self.ssl_loss(fs)
 
         preds = self.online_regressor(out1["fused"])
-        loss_reg = F.mse_loss(preds, targets)
+        loss_reg = F.mse_loss(preds, targets.unsqueeze(1))
 
         loss = loss_ssl + 1e-4 * loss_reg
 
@@ -187,11 +195,12 @@ class MMAQViT(nn.Module):
 
     def validation_step(self, batch, batch_idx):
 
-        imgs, s5, tab, targets = batch
-        _, _, _, fused = self.forward(imgs, s5, tab)
-        preds = self.online_regressor(fused)
+        im1, im2, s51, s52, tab1, tab2, targets = batch
+        out = self.forward(im1, s51, tab1)
+        preds = self.online_regressor(out["fused"])
 
         loss = F.mse_loss(preds, targets)
+        targets = targets.unsqueeze(1)
 
         # Update metrics (TorchMetrics handles accumulation internally)
         self.val_mae.update(preds, targets)
@@ -202,7 +211,7 @@ class MMAQViT(nn.Module):
         # Log step loss (proper DDP sync)
         self.log(
             "val_step_loss",
-            regr_loss,
+            loss,
             prog_bar=False,
             sync_dist=True,
             batch_size=targets.size(0)
@@ -245,6 +254,8 @@ class MMAQViT(nn.Module):
             [
                 self.vit_s2,
                 self.vit_s5,
+                self.vit_s2_proj,
+                self.vit_s5_proj,
                 self.text_encoder,
                 self.fusion,
                 self.proj_s2,

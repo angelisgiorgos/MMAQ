@@ -8,6 +8,7 @@ warnings.filterwarnings("ignore")
 import torch
 import torch.multiprocessing
 import argparse
+from dataset.SatelliteConstrativeDataset import DatasetTextCollate
 
 try:
     torch.serialization.add_safe_globals([argparse.Namespace])
@@ -52,6 +53,11 @@ def pretrain(args, wandb_logger):
     else:
         train_dataset, val_dataset, data_stats = load_datasets(args)
 
+    if args.tabular_as_text:
+        collate_fn = DatasetTextCollate(tokenizer_name=args.tokenizer_name, max_length=args.max_length)
+    else:
+        collate_fn = None
+
     train_loader = DataLoader(
         train_dataset,
         num_workers=args.num_workers,
@@ -59,7 +65,8 @@ def pretrain(args, wandb_logger):
         pin_memory=True,
         shuffle=True,
         persistent_workers=True,
-        drop_last=True
+        drop_last=True, 
+        collate_fn=collate_fn
     )
 
     val_loader = DataLoader(
@@ -69,6 +76,7 @@ def pretrain(args, wandb_logger):
         pin_memory=True,
         shuffle=False,
         persistent_workers=True,
+        collate_fn=collate_fn
     )
 
     print(f"Train dataset length: {len(train_dataset)}")

@@ -136,24 +136,19 @@ def load_datasets(args):
 
     train, val = split_samples_df(samples_df, test_size=0.2)
 
-    if args.tabular_as_text:
-        collate_fn = DatasetTextCollate(tokenizer_name=args.tokenizer_name, max_length=args.max_length)
-    else:
-        collate_fn = None
     
     train_dataset = SatelliteContrastiveDataset(
         args=args,
         data_tabular=train,
         augmentation=train_aug_transforms,
-        transforms=train_default_transforms,
-        collate_fn=collate_fn
+        default_transform=train_default_transforms,
+
     )
     val_dataset = SatelliteContrastiveDataset(
         args=args,
         data_tabular=val,
         augmentation=val_default_transforms,
-        transforms=val_default_transforms,
-        collate_fn=collate_fn
+        default_transform=val_default_transforms,
     )
 
     return train_dataset, val_dataset, data_stats
